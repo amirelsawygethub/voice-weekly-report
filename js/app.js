@@ -5,8 +5,9 @@ import { transcribe, blobToPCM, loadModel, onProgress, DEFAULT_MODEL } from './t
 import { SECTIONS, summarise, emptySections } from './summarize.js';
 import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML, reportToText, projectTitle, esc } from './report.js';
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
+import * as ai from './ai.js';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const AUDIO_RETENTION_DAYS = 90;
 const TAGS = SECTIONS.map(s => s.tag);
 const APP_URL = new URL('./', location.href).href;
@@ -24,7 +25,8 @@ const state = {
   processing: false,
   processAgain: false,
   model: { pct: 0, active: false, ready: false, error: '' },
-  installPrompt: null
+  installPrompt: null,
+  ai: { enabled: false, mode: 'proxy', proxyUrl: '', accessCode: '', apiKey: '' }
 };
 
 const DEFAULT_SETTINGS = {
@@ -42,6 +44,10 @@ const DEFAULT_SETTINGS = {
 async function loadState() {
   state.settings = { ...DEFAULT_SETTINGS, ...((await db.get('settings', 'app')) || {}) };
   state.projects = ((await db.getAll('projects')) || []).sort((a, b) => a.createdAt - b.createdAt);
+  try {
+    const aiRec = await db.get('settings', 'ai');
+    if (aiRec) state.ai = { ...state.ai, ...(await decryptJSON(aiRec)) };
+  } catch { /* keep defaults */ }
   const raw = (await db.getAll('notes')) || [];
   state.notes = [];
   for (const n of raw) state.notes.push(await decryptNote(n));
@@ -49,6 +55,8 @@ async function loadState() {
 }
 
 const saveSettings = () => db.put('settings', state.settings, 'app');
+// AI editor credentials are encrypted with the device key.
+const saveAi = async () => db.put('settings', await encryptJSON(state.ai), 'ai');
 
 async function decryptNote(record) {
   let payload = { segments: [], transcript: '', sections: null };
@@ -157,6 +165,7 @@ function statusPill(note) {
 }
 
 function firstBullet(note) {
+  if (note.status === 'processing' && note.stage === 'editing') return 'Editing into business-formal bullets';
   if (note.status === 'processing' && state.model.active) return `Preparing speech model ${state.model.pct}%`;
   if (note.status !== 'done' || !note.sections) return note.error || 'Processing on your device';
   for (const s of SECTIONS) if (note.sections[s.key]?.length) return note.sections[s.key][0];
@@ -284,6 +293,11 @@ const RENDER = {
       box.innerHTML = `<div class="card"><p class="muted">${esc(firstBullet(note))}. You can leave this screen; the note will be ready shortly.</p><div class="progress"><div style="width:${state.model.active ? state.model.pct : 15}%"></div></div></div>`;
     }
     $('#note-transcript').textContent = note.transcript || 'Not yet available.';
+    const edited = note.status === 'done';
+    $('#note-editor').textContent = !edited ? '' : note.editor === 'ai'
+      ? 'Edited by the AI business-writing editor.'
+      : `Standard on-device edit.${note.aiError ? ' ' + note.aiError : ''}`;
+    $('#note-ai').hidden = !(edited && note.editor !== 'ai' && ai.isConfigured(state.ai));
 
     const audio = $('#note-audio');
     if (audio.dataset.url) URL.revokeObjectURL(audio.dataset.url);
@@ -322,12 +336,28 @@ const RENDER = {
     $('#rep-submit').textContent = meta?.submittedAt ? 'Submitted' : 'Mark as submitted';
     if (meta?.submittedAt) $('#rep-submit').disabled = true;
 
+    $('#rep-polish').hidden = true;
     if (!hasContent) {
       $('#rep-body').innerHTML = '<div class="empty">No processed notes for this week yet. Record a note and the report will be generated automatically.</div>';
       state.currentReport = null;
       return;
     }
     state.currentReport = buildReport({ notes: done, projects: state.projects, profile: state.settings.profile, start: wk.start, lastWorkday: wk.lastWorkday });
+    state.reportSignature = reportSignature(done);
+    let polishedNote = '';
+    if (meta?.polished) {
+      try {
+        const polished = await decryptJSON(meta.polished);
+        if (polished.signature === state.reportSignature) {
+          applyPolish(state.currentReport, polished.byProject);
+          polishedNote = '<div class="banner info">Final wording polished by the AI business-writing editor.</div>';
+        } else {
+          polishedNote = '<div class="banner warn">Notes changed after the AI polish. Polish again to update the final wording.</div>';
+        }
+      } catch { /* ignore stale data */ }
+    }
+    $('#rep-status').innerHTML += polishedNote;
+    $('#rep-polish').hidden = !ai.isConfigured(state.ai);
     $('#rep-body').innerHTML = reportToHTML(state.currentReport);
   },
 
@@ -342,6 +372,7 @@ const RENDER = {
     $('#app-version').textContent = APP_VERSION;
     renderProjects();
     renderModelStatus();
+    renderAiSettings();
     try {
       const est = await navigator.storage?.estimate?.();
       const persisted = await navigator.storage?.persisted?.();
@@ -527,6 +558,14 @@ async function processNote(note) {
     resummarise(note);
     const words = note.transcript.split(/\s+/).filter(Boolean).length;
     note.status = words < 4 ? 'review' : 'done';
+    if (note.status === 'done' && ai.isConfigured(state.ai)) {
+      note.status = 'processing';
+      note.stage = 'editing';
+      refreshIfShowing(note);
+      await aiEditNote(note);
+      note.status = 'done';
+    }
+    note.stage = '';
   } catch (err) {
     console.error(err);
     note.status = 'error';
@@ -545,6 +584,21 @@ function resummarise(note) {
   note.sections = note.transcript
     ? summarise(note.transcript, { tags: note.tags || [], glossary: project.glossary || [], projectTerms: [project.name, project.code].filter(Boolean) })
     : emptySections();
+  note.editor = 'standard';
+}
+
+// Second editing layer: Claude rewrites the transcript as business-formal
+// bullets. On any failure the standard on-device edit stays in place.
+async function aiEditNote(note) {
+  try {
+    const project = projectById(note.projectId) || { name: 'Unassigned project', glossary: [] };
+    note.sections = await ai.editNote(state.ai, { transcript: note.transcript, tags: note.tags || [], project });
+    note.editor = 'ai';
+    note.aiError = '';
+  } catch (err) {
+    console.error(err);
+    note.aiError = ai.friendlyError(err);
+  }
 }
 
 function refreshIfShowing(note) {
@@ -680,7 +734,8 @@ function wire() {
   $('#rep-correct').onclick = () => show('record', { mode: 'new' });
   $('#rep-submit').onclick = async () => {
     const wk = currentWeek(state.reportOffset);
-    await db.put('reports', { id: weekKey(wk.start), submittedAt: Date.now() });
+    const existing = (await db.get('reports', weekKey(wk.start))) || {};
+    await db.put('reports', { ...existing, id: weekKey(wk.start), submittedAt: Date.now() });
     toast('Report marked as submitted.');
     RENDER.report();
   };
@@ -714,6 +769,47 @@ function wire() {
     resetKeyCache();
     location.replace(APP_URL);
   };
+
+  // AI editor
+  const readAi = () => {
+    state.ai = {
+      enabled: $('#ai-enabled').checked,
+      mode: $('#ai-mode').value,
+      proxyUrl: $('#ai-proxy').value.trim(),
+      accessCode: $('#ai-code').value.trim(),
+      apiKey: $('#ai-key').value.trim()
+    };
+    saveAi();
+    renderAiSettings();
+  };
+  ['#ai-enabled', '#ai-mode', '#ai-proxy', '#ai-code', '#ai-key'].forEach(sel => { $(sel).onchange = readAi; });
+  $('#ai-test').onclick = async () => {
+    readAi();
+    if (!ai.isConfigured(state.ai)) { $('#ai-status').textContent = 'Turn the editor on and complete the connection details first.'; return; }
+    $('#ai-test').disabled = true;
+    $('#ai-status').textContent = 'Testing the AI editor...';
+    try {
+      await ai.testConnection(state.ai);
+      $('#ai-status').textContent = 'Connected. New notes will be edited automatically.';
+    } catch (err) {
+      console.error(err);
+      $('#ai-status').textContent = ai.friendlyError(err);
+    }
+    $('#ai-test').disabled = false;
+  };
+  $('#note-ai').onclick = async () => {
+    const note = state.notes.find(n => n.id === state.viewOpts.id);
+    if (!note) return;
+    $('#note-ai').disabled = true;
+    toast('Editing with the AI editor...');
+    await aiEditNote(note);
+    note.updatedAt = Date.now();
+    await saveNote(note);
+    $('#note-ai').disabled = false;
+    toast(note.editor === 'ai' ? 'Note edited.' : note.aiError);
+    refreshIfShowing(note);
+  };
+  $('#rep-polish').onclick = polishReport;
 
   window.addEventListener('beforeinstallprompt', e => {
     e.preventDefault();
@@ -767,7 +863,7 @@ async function editProject(project) {
   const i = state.projects.findIndex(x => x.id === updated.id);
   if (i >= 0) state.projects[i] = updated; else state.projects.push(updated);
   // Re-apply terminology to existing notes for this project.
-  for (const note of state.notes.filter(n => n.projectId === updated.id && n.status === 'done')) {
+  for (const note of state.notes.filter(n => n.projectId === updated.id && n.status === 'done' && n.editor !== 'ai')) {
     resummarise(note);
     await saveNote(note);
   }
@@ -806,6 +902,57 @@ async function shareReport() {
   }
   const to = state.settings.profile.recipient || '';
   location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(text)}`;
+}
+
+/* ---------- AI editor helpers ---------- */
+
+function renderAiSettings() {
+  const c = state.ai;
+  $('#ai-enabled').checked = !!c.enabled;
+  $('#ai-mode').value = c.mode || 'proxy';
+  $('#ai-proxy').value = c.proxyUrl || '';
+  $('#ai-code').value = c.accessCode || '';
+  $('#ai-key').value = c.apiKey || '';
+  $('#ai-fields').hidden = !c.enabled;
+  document.querySelectorAll('[data-ai]').forEach(el => { el.hidden = el.dataset.ai !== (c.mode || 'proxy'); });
+}
+
+function reportSignature(notes) {
+  return notes.map(n => `${n.id}:${n.updatedAt || n.createdAt}`).sort().join('|');
+}
+
+function applyPolish(report, byProject) {
+  for (const block of report.projects) {
+    const p = byProject[block.project.id];
+    if (!p) continue;
+    for (const s of block.sections) { s.items = p[s.key] || []; s.omitted = 0; }
+  }
+}
+
+async function polishReport() {
+  if (!state.currentReport) return;
+  const wk = currentWeek(state.reportOffset);
+  const notes = notesInWeek(wk).filter(n => n.status === 'done');
+  const draft = buildReport({ notes, projects: state.projects, profile: state.settings.profile, start: wk.start, lastWorkday: wk.lastWorkday });
+  const blocks = draft.projects.map(b => ({
+    project: projectById(b.project.id) || { ...b.project, id: b.project.id || 'unassigned' },
+    sections: Object.fromEntries(b.sections.map(s => [s.key, s.items]))
+  }));
+  $('#rep-polish').disabled = true;
+  $('#rep-polish').textContent = 'Polishing...';
+  try {
+    const byProject = await ai.editWeek(state.ai, blocks);
+    const existing = (await db.get('reports', weekKey(wk.start))) || {};
+    const polished = await encryptJSON({ signature: reportSignature(notes), byProject });
+    await db.put('reports', { ...existing, id: weekKey(wk.start), polished });
+    toast('Final wording polished.');
+  } catch (err) {
+    console.error(err);
+    toast(ai.friendlyError(err), 4000);
+  }
+  $('#rep-polish').disabled = false;
+  $('#rep-polish').textContent = 'Polish final wording with AI';
+  RENDER.report();
 }
 
 /* ---------- Boot ---------- */

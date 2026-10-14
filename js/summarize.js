@@ -1,6 +1,7 @@
 // Converts a voice-note transcript into concise, business-formal bullets
 // grouped into the four mandatory weekly report sections. Runs entirely on
 // the device with deterministic rules, so no text is sent to any service.
+import { polish } from './editor.js';
 
 export const SECTIONS = [
   { key: 'achievements', label: 'Achievements / Progress', tag: 'Achievements', empty: 'No progress reported this week.' },
@@ -22,9 +23,9 @@ const STRONG = [
 // Weak cues classify a single sentence without changing the running section.
 const WEAK = {
   achievements: /\b(completed?|finished|delivered|launched|finali[sz]ed|submitted|achieved|accomplished|managed to|successfully|signed|approved|held|conducted|trained|onboarded|published|closed|resolved)\b/,
-  challenges: /\b(delay(ed|s)?|blocked|waiting (on|for)|pending|struggl\w*|unable to|could ?n[o']t|failed|shortage|unstable|lack of|behind schedule|overdue|bottleneck|pending approval|risk)\b/,
+  challenges: /\b(delay(ed|s)?|blocked|wait(ing)? (on|for)|pending|struggl\w*|unable to|could ?n[o']t|failed|shortage|unstable|lack of|behind schedule|overdue|bottleneck|pending approval|risk)\b/,
   priorities: /\b(i|we) (will|'ll|plan to|intend to|am going to|are going to|aim to)\b|\b(i'll|we'll)\b|\bupcoming\b|\bby (monday|tuesday|wednesday|thursday|friday|sunday|saturday|the end of)\b/,
-  support: /\b(need|require) (help|support|approval|assistance|guidance)\b|\bhelp from\b|\bapproval (for|from)\b/
+  support: /\b(need|require) (help|support|approval|assistance|guidance)\b|\bhelp from\b/
 };
 
 const NONE = {
@@ -96,6 +97,7 @@ export function normalise(text) {
     .replace(/\[(.*?)\]|\((?:music|silence|inaudible|blank_audio)\)/gi, ' ')
     .replace(/\s+([,.!?])/g, '$1')
     .replace(/,\s*,/g, ',')
+    .replace(/,\s*([.!?])/g, '$1')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -138,6 +140,7 @@ const LEADS = [
 ];
 
 const PRONOUN_LEADS = [
+  [/^(i|we)( am| are|'m|'re)?( still)? wait(ing)? (for|on)\s+/i, 'Awaiting '],
   [/^(i|we)('ll| will| shall| am going to| are going to|'m going to|'re going to| plan to| intend to| need to| want to| aim to| hope to| expect to| would like to)( also)?\s+/i, ''],
   [/^(i|we) (was|were) able to\s+/i, 'Managed to '],
   [/^(i|we)('ve| have| had)( also)?\s+(?=\w+(ed|en|t)\b)/i, ''],
@@ -194,7 +197,7 @@ export function emptySections() {
 
 export function summarise(transcript, { tags = [], glossary = [], projectTerms = [] } = {}) {
   const result = emptySections();
-  const text = normalise(applyGlossary(transcript || '', [...glossary, ...projectTerms]));
+  const text = normalise(polish(applyGlossary(transcript || '', [...glossary, ...projectTerms])));
   if (!text) return result;
 
   const tagKeys = tags.map(t => TAG_TO_KEY[t]).filter(Boolean);

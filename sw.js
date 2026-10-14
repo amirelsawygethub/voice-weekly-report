@@ -1,6 +1,6 @@
 // Service worker: makes the app installable and usable offline.
 // Network-first for app files so updates arrive promptly; cache fallback offline.
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const CACHE = `vwr-shell-${VERSION}`;
 const SHELL = [
   './',
@@ -16,6 +16,8 @@ const SHELL = [
   './js/summarize.js',
   './js/report.js',
   './js/reminder.js',
+  './js/editor.js',
+  './js/ai.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://api.anthropic.com https://*.workers.dev https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#1F3A5F">
   <meta name="description" content="Record voice notes and receive an automatically generated weekly report.">
@@ -127,11 +127,13 @@
         <audio id="note-audio" controls preload="none"></audio>
       </div>
       <div id="note-sections"></div>
+      <div class="fine" id="note-editor"></div>
       <details class="card">
         <summary>Transcript</summary>
         <p id="note-transcript" class="transcript"></p>
       </details>
       <div class="stack">
+        <button class="btn secondary block" id="note-ai" hidden>Edit with AI editor</button>
         <button class="btn primary block" id="note-followup">Add to this note (voice)</button>
         <button class="btn secondary block" id="note-rerecord">Re-record</button>
         <button class="btn danger block" id="note-delete">Delete note</button>
@@ -157,6 +159,7 @@
           <button class="btn secondary grow" id="rep-download">Download</button>
           <button class="btn secondary grow" id="rep-print">PDF</button>
         </div>
+        <button class="btn secondary block" id="rep-polish" hidden>Polish final wording with AI</button>
         <button class="btn secondary block" id="rep-correct">Record a correction</button>
         <button class="btn ghost block" id="rep-submit">Mark as submitted</button>
       </div>
@@ -205,9 +208,28 @@
         <button class="btn secondary block" id="set-model-load">Download model now</button>
       </div>
       <div class="card">
+        <h3>AI business-writing editor</h3>
+        <p class="muted">Optional. After transcription, Claude edits each note into business-formal bullets. It keeps your main ideas and facts, removes filler and repetition, and rewrites incoherent passages clearly. The standard on-device edit always runs and is used whenever the AI editor is off or unavailable.</p>
+        <label class="toggle"><input type="checkbox" id="ai-enabled"> Use the AI editor</label>
+        <div id="ai-fields" hidden>
+          <label class="field">Connection
+            <select id="ai-mode">
+              <option value="proxy">Team proxy (recommended)</option>
+              <option value="key">Personal Anthropic API key</option>
+            </select>
+          </label>
+          <label class="field" data-ai="proxy">Team proxy URL <input id="ai-proxy" type="url" inputmode="url" autocomplete="off" placeholder="https://weekly-report-editor.yourteam.workers.dev"></label>
+          <label class="field" data-ai="proxy">Team access code <input id="ai-code" type="password" autocomplete="off"></label>
+          <label class="field" data-ai="key" hidden>Anthropic API key <input id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
+          <button class="btn secondary block" id="ai-test">Test connection</button>
+          <div class="fine" id="ai-status"></div>
+        </div>
+        <p class="fine">Privacy: only transcript text is sent to Anthropic for editing. Audio never leaves this device. Connection details are stored encrypted on this device.</p>
+      </div>
+      <div class="card">
         <h3>Privacy and security</h3>
         <ul class="plain">
-          <li>Audio and transcripts never leave this device.</li>
+          <li>Audio never leaves this device. Transcripts stay on the device unless you turn on the AI editor.</li>
           <li>All notes are encrypted with AES-256-GCM. The key cannot be exported.</li>
           <li>Audio is deleted automatically after 90 days. Reports are kept.</li>
         </ul>
