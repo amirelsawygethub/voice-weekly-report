@@ -183,6 +183,8 @@ ul.plain li { margin-bottom: .35rem; }
 .badge { display: inline-flex; align-items: center; gap: 4px; font-size: .74rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--soft); color: var(--muted); }
 .badge.ai { background: rgba(201,162,39,.16); color: #8A6D0B; }
 @media (prefers-color-scheme: dark) { .badge.ai { color: var(--gold); } }
+.grp + .grp { margin-top: 18px; padding-top: 16px; border-top: 2px solid var(--border); }
+.grp-name { font-size: 1rem; margin: 0 0 10px; color: var(--text); }
 .note-body .sec + .sec { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .note-body h4 { margin: 0 0 6px; font-size: .9rem; color: var(--navy); }
 .note-body ul { margin: 0; padding-left: 1.2rem; }

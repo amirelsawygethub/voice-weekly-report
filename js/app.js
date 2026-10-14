@@ -4,15 +4,15 @@ import { Recorder, isSupported, MAX_SECONDS } from './recorder.js';
 import { transcribe, blobToPCM, loadModel, onProgress, DEFAULT_MODEL } from './transcriber.js';
 import { SECTIONS, summarise, emptySections, predictTitle } from './summarize.js';
 import { coach } from './coach.js';
+import { analyse, matchKnown, normName, GENERAL } from './extract.js';
 import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML, reportToText, projectTitle, esc } from './report.js';
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 // Bump when the on-device editing rules change, so older notes are re-edited.
-const RULES_VERSION = 2;
+const RULES_VERSION = 5;
 const AUDIO_RETENTION_DAYS = 90;
-const TAGS = SECTIONS.map(s => s.tag);
 const APP_URL = new URL('./', location.href).href;
 
 const $ = sel => document.querySelector(sel);
@@ -37,7 +37,6 @@ const DEFAULT_SETTINGS = {
   weekStart: 0,
   reminderTime: '17:00',
   model: DEFAULT_MODEL,
-  lastProjectId: null,
   onboarded: false,
   installDismissed: false
 };
@@ -244,7 +243,7 @@ const RENDER = {
         <button class="item" data-note="${esc(n.id)}">
           <div class="grow">
             <div class="title">${esc(n.status === 'done' && n.title ? n.title : firstBullet(n))}</div>
-            <div class="sub">${esc(projectName(n.projectId))} · ${esc(formatDate(n.createdAt))}</div>
+            <div class="sub">${esc(noteProjects(n))} · ${esc(formatDate(n.createdAt))}</div>
           </div>
           ${statusPill(n)}
         </button>`).join('')
@@ -257,16 +256,9 @@ const RENDER = {
   },
 
   record(opts) {
-    const sel = $('#rec-project');
-    sel.innerHTML = state.projects.map(p => `<option value="${esc(p.id)}">${esc(projectTitle(p))}</option>`).join('');
-    const parent = opts.noteId ? state.notes.find(n => n.id === opts.noteId) : null;
-    sel.value = parent?.projectId || state.settings.lastProjectId || state.projects[0]?.id || '';
-    sel.disabled = !!parent;
-    const preset = new Set(parent ? parent.tags : (opts.tags || []));
-    $('#rec-tags').innerHTML = TAGS.map(t => `<button type="button" class="chip" aria-pressed="${preset.has(t)}" data-tag="${esc(t)}">${esc(t)}</button>`).join('');
-    $('#rec-tags').closest('.field').hidden = !!parent;
-    $('#rec-hint').textContent = opts.mode === 'followup' && opts.tags?.length ? `Adding ${opts.tags.join(', ').toLowerCase()} to this note`
-      : opts.mode === 'followup' ? 'Adding to an existing note' : opts.mode === 'rerecord' ? 'This will replace the existing note' : `Maximum ${MAX_SECONDS / 60} minutes per note`;
+    $('#rec-hint').textContent = opts.mode === 'followup' ? 'Adding to an existing note'
+      : opts.mode === 'rerecord' ? 'This will replace the existing note'
+      : `Just speak. Projects and sections are detected automatically. Up to ${MAX_SECONDS / 60} minutes.`;
     resetRecorderUI();
     if (!isSupported()) {
       $('#rec-hint').textContent = 'Voice recording is not supported in this browser. On iPhone, use Safari. On Android, use Chrome.';
@@ -278,7 +270,7 @@ const RENDER = {
     const note = state.notes.find(n => n.id === id);
     if (!note) return show('home', {}, { replace: true });
     const done = note.status === 'done' && note.sections;
-    $('#note-project').textContent = projectTitle(projectById(note.projectId) || { name: 'Unassigned project' });
+    $('#note-project').textContent = done ? noteProjects(note) : 'Detecting project';
     $('#note-title').textContent = done ? (note.title || 'Weekly update') : 'Processing note';
     $('#note-date').textContent = `${formatDate(note.createdAt)} · ${Math.max(1, Math.round((note.duration || 0) / 60))} min`;
     $('#note-status').outerHTML = statusPill(note).replace('<span', '<span id="note-status"');
@@ -286,13 +278,13 @@ const RENDER = {
     const box = $('#note-sections');
     box.classList.toggle('card', !!done);
     if (done) {
-      box.innerHTML = SECTIONS.map(s => {
-        const items = note.sections[s.key] || [];
-        const none = (s.key === 'support' && note.sections.none?.support) || (s.key === 'challenges' && note.sections.none?.challenges);
-        if (items.length) return `<div class="sec"><h4>${esc(s.label)}</h4><ul>${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>`;
-        if (none) return `<div class="sec"><h4>${esc(s.label)}</h4><ul><li>${esc(s.empty)}</li></ul></div>`;
-        return `<div class="sec missing"><h4>${esc(s.label)}</h4><p>Not mentioned. <button class="link-btn" data-addtag="${esc(s.tag)}">Add by voice</button></p></div>`;
-      }).join('');
+      const groups = noteGroups(note);
+      const multi = groups.length > 1;
+      box.innerHTML = groups.map(g => {
+        const secs = SECTIONS.filter(s => g.sections[s.key]?.length)
+          .map(s => `<div class="sec"><h4>${esc(s.label)}</h4><ul>${g.sections[s.key].map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>`).join('');
+        return multi ? `<div class="grp"><h3 class="grp-name">${esc(projectTitle(projectById(g.projectId) || { name: 'Unassigned project' }))}</h3>${secs}</div>` : secs;
+      }).join('') || '<div class="empty">No report content was detected. Please re-record and describe your progress, challenges, priorities and any support needed.</div>';
     } else if (note.status === 'review') {
       box.innerHTML = '<div class="banner warn">Very little speech was detected. Please re-record in a quieter place, closer to the microphone.</div>';
     } else if (note.status === 'error') {
@@ -308,11 +300,10 @@ const RENDER = {
       : `<span class="badge">On-device edit</span>${note.aiError ? `<span>${esc(note.aiError)}</span>` : ''}${aiOn ? '' : '<button class="link-btn" data-go="settings">Turn on the AI editor for sharper wording</button>'}`;
     $('#note-ai').hidden = !(done && note.editor !== 'ai' && aiOn);
 
-    const tips = done ? coach(note, projectById(note.projectId)) : [];
+    const tips = done ? coach(note, state.projects) : [];
     $('#note-coach').hidden = !tips.length;
     $('#note-tips').innerHTML = tips.map(t => `<li><span>${esc(t.text)}</span>${
-      t.tag ? `<button class="chip" data-addtag="${esc(t.tag)}">${esc(t.action)}</button>`
-      : t.term ? `<button class="chip" data-addterm="${esc(t.term)}">${esc(t.action)}</button>` : ''}</li>`).join('');
+      t.term ? `<button class="chip" data-addterm="${esc(t.term)}">${esc(t.action)}</button>` : ''}</li>`).join('');
 
     const audio = $('#note-audio');
     if (audio.dataset.url) URL.revokeObjectURL(audio.dataset.url);
@@ -357,7 +348,7 @@ const RENDER = {
       state.currentReport = null;
       return;
     }
-    state.currentReport = buildReport({ notes: done, projects: state.projects, profile: state.settings.profile, start: wk.start, lastWorkday: wk.lastWorkday });
+    state.currentReport = buildReport({ notes: expandGroups(done), projects: state.projects, profile: state.settings.profile, start: wk.start, lastWorkday: wk.lastWorkday });
     state.reportSignature = reportSignature(done);
     let polishedNote = '';
     if (meta?.polished) {
@@ -468,7 +459,6 @@ function drawWave() {
 }
 
 async function startRecording() {
-  if (!state.projects.length) { toast('Please add a project in Settings first.'); return; }
   const rec = new Recorder({
     onTick: sec => { $('#rec-timer').textContent = fmtTime(sec); },
     onLevel: lvl => { state.levels.push(lvl); if (state.levels.length > 600) state.levels.shift(); drawWave(); },
@@ -514,7 +504,7 @@ async function finishRecording() {
   }
   if (note && opts.mode === 'followup') {
     note.audioIds = [...(note.audioIds || []), audioId];
-    note.segments = [...(note.segments || []), { audioId, text: null, tags: opts.tags || [] }];
+    note.segments = [...(note.segments || []), { audioId, text: null }];
     note.duration = (note.duration || 0) + result.duration;
   } else if (note && opts.mode === 'rerecord') {
     for (const id of note.audioIds || []) await db.del('audio', id);
@@ -524,14 +514,10 @@ async function finishRecording() {
     note.transcript = '';
     note.sections = null;
   } else {
-    const projectId = $('#rec-project').value;
-    const tags = [...document.querySelectorAll('#rec-tags .chip[aria-pressed="true"]')].map(c => c.dataset.tag);
     note = {
-      id: db.uid(), projectId, tags, createdAt: Date.now(), duration: result.duration,
+      id: db.uid(), projectId: null, tags: [], groups: [], createdAt: Date.now(), duration: result.duration,
       audioIds: [audioId], segments: [{ audioId, text: null }], transcript: '', sections: null
     };
-    state.settings.lastProjectId = projectId;
-    saveSettings();
   }
   note.status = 'queued';
   note.error = '';
@@ -570,7 +556,7 @@ async function processNote(note) {
       seg.text = await transcribe(pcm, state.settings.model);
       await saveNote(note);
     }
-    resummarise(note);
+    await resummarise(note);
     const words = note.transcript.split(/\s+/).filter(Boolean).length;
     note.status = words < 4 ? 'review' : 'done';
     if (note.status === 'done' && ai.isConfigured(state.ai)) {
@@ -593,29 +579,59 @@ async function processNote(note) {
   refreshIfShowing(note);
 }
 
-function resummarise(note) {
-  const project = projectById(note.projectId) || {};
-  const opts = { glossary: project.glossary || [], projectTerms: [project.name, project.code].filter(Boolean) };
+// Automatic analysis: detects the project(s) spoken about and extracts the
+// four sections for each. Nobody selects a project or a tag.
+async function resummarise(note) {
   note.transcript = (note.segments || []).map(s => s.text || '').join(' ').trim();
-  // Each recording is read with its own intent, so "Add challenges" clips land in Challenges.
-  const merged = emptySections();
-  for (const seg of note.segments || []) {
-    if (!seg.text) continue;
-    const part = summarise(seg.text, { ...opts, tags: seg.tags?.length ? seg.tags : note.tags || [] });
-    for (const s of SECTIONS) merged[s.key].push(...part[s.key]);
-    merged.none.support ||= part.none.support;
-    merged.none.challenges ||= part.none.challenges;
-  }
-  note.sections = merged;
-  note.title = note.transcript ? predictTitle(note.transcript, merged, opts.projectTerms) : '';
+  const fallback = projectById(note.projectId)?.name || (state.projects.length === 1 ? state.projects[0].name : GENERAL);
+  const result = note.transcript ? analyse(note.transcript, state.projects, fallback) : { title: '', groups: [] };
+  await setGroups(note, result.groups);
+  note.title = result.title;
   note.editor = 'standard';
   note.aiTips = [];
   note.rulesVersion = RULES_VERSION;
 }
 
+// Finds a project by spoken name, or learns it as a new project.
+async function resolveProject(name) {
+  const known = matchKnown(name, state.projects);
+  if (known) return known;
+  const project = { id: db.uid(), name, code: '', glossary: [], createdAt: Date.now(), auto: true };
+  await db.put('projects', project);
+  state.projects.push(project);
+  return project;
+}
+
+async function setGroups(note, groups) {
+  note.groups = [];
+  for (const g of groups) {
+    const project = await resolveProject(g.name);
+    const existing = note.groups.find(x => x.projectId === project.id);
+    if (existing) SECTIONS.forEach(s => existing.sections[s.key].push(...g.sections[s.key]));
+    else note.groups.push({ projectId: project.id, sections: g.sections });
+  }
+  note.projectId = note.groups[0]?.projectId || note.projectId || null;
+  const merged = emptySections();
+  for (const g of note.groups) SECTIONS.forEach(s => merged[s.key].push(...(g.sections[s.key] || [])));
+  note.sections = merged;
+}
+
+function noteGroups(note) {
+  return note.groups?.length ? note.groups : (note.sections ? [{ projectId: note.projectId, sections: note.sections }] : []);
+}
+
+function noteProjects(note) {
+  if (note.status !== 'done') return 'Detecting project';
+  return noteGroups(note).map(g => projectName(g.projectId)).join(', ') || 'No project detected';
+}
+
+// One report entry per project mentioned in each note.
+function expandGroups(notes) {
+  return notes.flatMap(n => noteGroups(n).map(g => ({ ...n, projectId: g.projectId, sections: g.sections })));
+}
+
 function transcriptForAi(note) {
-  return (note.segments || []).filter(s => s.text).map(s =>
-    s.tags?.length ? `[Follow-up recording about: ${s.tags.join(', ')}] ${s.text}` : s.text).join('\n\n');
+  return (note.segments || []).filter(s => s.text).map(s => s.text).join('\n\n');
 }
 
 async function addKeyTerm(projectId, term) {
@@ -623,8 +639,8 @@ async function addKeyTerm(projectId, term) {
   if (!project) return;
   project.glossary = [...new Set([...(project.glossary || []), term])];
   await db.put('projects', project);
-  for (const note of state.notes.filter(n => n.projectId === projectId && n.status === 'done' && n.editor !== 'ai')) {
-    resummarise(note);
+  for (const note of state.notes.filter(n => noteGroups(n).some(g => g.projectId === projectId) && n.status === 'done' && n.editor !== 'ai')) {
+    await resummarise(note);
     await saveNote(note);
   }
   toast(`"${term}" added to key terms. Edit its spelling in Settings if needed.`, 3500);
@@ -634,11 +650,10 @@ async function addKeyTerm(projectId, term) {
 // bullets. On any failure the standard on-device edit stays in place.
 async function aiEditNote(note) {
   try {
-    const project = projectById(note.projectId) || { name: 'Unassigned project', glossary: [] };
-    const { title, tips, ...sections } = await ai.editNote(state.ai, { transcript: transcriptForAi(note), tags: note.tags || [], project });
-    note.sections = sections;
-    if (title) note.title = title;
-    note.aiTips = tips || [];
+    const result = await ai.analyseNote(state.ai, { transcript: transcriptForAi(note), known: state.projects });
+    if (result.projects.length) await setGroups(note, result.projects);
+    if (result.title) note.title = result.title;
+    note.aiTips = result.tips || [];
     note.editor = 'ai';
     note.aiError = '';
   } catch (err) {
@@ -688,8 +703,6 @@ function wire() {
     if (go) show(go.dataset.go, { mode: 'new' });
     const noteBtn = e.target.closest('[data-note]');
     if (noteBtn) show('note', { id: noteBtn.dataset.note });
-    const addTag = e.target.closest('[data-addtag]');
-    if (addTag && state.view === 'note') show('record', { mode: 'followup', noteId: state.viewOpts.id, tags: [addTag.dataset.addtag] });
     const addTerm = e.target.closest('[data-addterm]');
     if (addTerm && state.view === 'note') {
       const note = state.notes.find(n => n.id === state.viewOpts.id);
@@ -717,13 +730,8 @@ function wire() {
   // Onboarding
   $('#ob-continue').onclick = async () => {
     const name = $('#ob-name').value.trim();
-    const projectNameValue = $('#ob-project').value.trim();
-    if (!name || !projectNameValue) { toast('Please enter your name and first project.'); return; }
+    if (!name) { toast('Please enter your name.'); return; }
     state.settings.profile = { name, recipient: $('#ob-recipient').value.trim() };
-    const project = { id: db.uid(), name: projectNameValue, code: $('#ob-code').value.trim(), glossary: [], createdAt: Date.now() };
-    await db.put('projects', project);
-    state.projects.push(project);
-    state.settings.lastProjectId = project.id;
     state.settings.onboarded = true;
     await saveSettings();
     try { await navigator.storage?.persist?.(); } catch { /* optional */ }
@@ -736,10 +744,6 @@ function wire() {
   $('#home-report').onclick = () => { state.reportOffset = 0; show('report'); };
 
   // Record
-  $('#rec-tags').onclick = e => {
-    const chip = e.target.closest('.chip');
-    if (chip) chip.setAttribute('aria-pressed', String(chip.getAttribute('aria-pressed') !== 'true'));
-  };
   $('#rec-main').onclick = () => {
     if (!state.recorder || state.recorder.state === 'idle') startRecording();
     else finishRecording();
@@ -907,8 +911,9 @@ async function editProject(project) {
   if (!ok) return;
   const name = $('#pj-name').value.trim();
   if (!name) { toast('Project name is required.'); return; }
+  const aliases = p.name && p.name !== name ? [...new Set([...(p.aliases || []), p.name])] : (p.aliases || []);
   const updated = {
-    ...p, id: p.id || db.uid(), createdAt: p.createdAt || Date.now(), name,
+    ...p, aliases, id: p.id || db.uid(), createdAt: p.createdAt || Date.now(), name,
     code: $('#pj-code').value.trim(),
     glossary: $('#pj-glossary').value.split(',').map(s => s.trim()).filter(Boolean)
   };
@@ -916,8 +921,24 @@ async function editProject(project) {
   const i = state.projects.findIndex(x => x.id === updated.id);
   if (i >= 0) state.projects[i] = updated; else state.projects.push(updated);
   // Re-apply terminology to existing notes for this project.
-  for (const note of state.notes.filter(n => n.projectId === updated.id && n.status === 'done' && n.editor !== 'ai')) {
-    resummarise(note);
+  // Renaming a project to an existing name merges the two.
+  const twin = state.projects.find(x => x.id !== updated.id && normName(x.name) === normName(updated.name));
+  if (twin) {
+    twin.glossary = [...new Set([...(twin.glossary || []), ...updated.glossary])];
+    twin.aliases = [...new Set([...(twin.aliases || []), ...(updated.aliases || [])])];
+    await db.put('projects', twin);
+    for (const note of state.notes) {
+      let changed = false;
+      for (const g of note.groups || []) if (g.projectId === updated.id) { g.projectId = twin.id; changed = true; }
+      if (note.projectId === updated.id) { note.projectId = twin.id; changed = true; }
+      if (changed) await saveNote(note);
+    }
+    await db.del('projects', updated.id);
+    state.projects = state.projects.filter(x => x.id !== updated.id);
+  }
+  const target = twin || updated;
+  for (const note of state.notes.filter(n => noteGroups(n).some(g => g.projectId === target.id) && n.status === 'done' && n.editor !== 'ai')) {
+    await resummarise(note);
     await saveNote(note);
   }
   renderProjects();
@@ -929,7 +950,6 @@ document.addEventListener('click', async e => {
   const project = state.editingProject;
   $('#dlg-cancel').click();
   if (!project) return;
-  if (state.projects.length === 1) { toast('At least one project is required.'); return; }
   if (!(await dialog({ title: `Delete ${project.name}?`, body: '<p>Existing notes will be kept and shown as an unassigned project.</p>', ok: 'Delete', danger: true }))) return;
   await db.del('projects', project.id);
   state.projects = state.projects.filter(p => p.id !== project.id);
@@ -986,7 +1006,7 @@ async function polishReport() {
   if (!state.currentReport) return;
   const wk = currentWeek(state.reportOffset);
   const notes = notesInWeek(wk).filter(n => n.status === 'done');
-  const draft = buildReport({ notes, projects: state.projects, profile: state.settings.profile, start: wk.start, lastWorkday: wk.lastWorkday });
+  const draft = buildReport({ notes: expandGroups(notes), projects: state.projects, profile: state.settings.profile, start: wk.start, lastWorkday: wk.lastWorkday });
   const blocks = draft.projects.map(b => ({
     project: projectById(b.project.id) || { ...b.project, id: b.project.id || 'unassigned' },
     sections: Object.fromEntries(b.sections.map(s => [s.key, s.items]))
@@ -1019,8 +1039,12 @@ async function boot() {
   await enforceRetention().catch(() => {});
   // Notes interrupted mid-processing (app closed) are resumed.
   state.notes.filter(n => n.status === 'processing').forEach(n => { n.status = 'queued'; });
+  for (const n of state.notes.filter(n => n.status === 'done' && n.editor === 'ai' && !n.groups?.length && n.sections)) {
+    n.groups = [{ projectId: n.projectId, sections: n.sections }];
+    await saveNote(n).catch(() => {});
+  }
   for (const n of state.notes.filter(n => n.status === 'done' && n.editor !== 'ai' && (n.rulesVersion || 1) < RULES_VERSION)) {
-    resummarise(n);
+    await resummarise(n);
     await saveNote(n).catch(() => {});
   }
   for (const n of state.notes.filter(n => n.status === 'done' && !n.title && n.transcript)) {

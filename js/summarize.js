@@ -23,7 +23,7 @@ const STRONG = [
 // Weak cues classify a single sentence without changing the running section.
 const WEAK = {
   achievements: /\b(completed?|finished|delivered|launched|finali[sz]ed|submitted|achieved|accomplished|managed to|successfully|signed|approved|held|conducted|trained|onboarded|published|closed|resolved)\b/,
-  challenges: /\b(delay(ed|s)?|blocked|wait(ing)? (on|for)|pending|struggl\w*|unable to|could ?n[o']t|failed|shortage|unstable|lack of|behind schedule|overdue|bottleneck|pending approval|risk)\b/,
+  challenges: /\b(delay(ed|s)?|blocked|wait(ing)? (on|for)|pending|postponed|cancel+ed|rescheduled|on hold|stalled|struggl\w*|unable to|could ?n[o']t|failed|shortage|unstable|lack of|behind schedule|overdue|bottleneck|pending approval|risk)\b/,
   priorities: /\b(i|we) (will|'ll|plan to|intend to|am going to|are going to|aim to)\b|\b(i'll|we'll)\b|\bupcoming\b|\bby (monday|tuesday|wednesday|thursday|friday|sunday|saturday|the end of)\b/,
   support: /\b(need|require) (help|support|approval|assistance|guidance)\b|\bhelp from\b/
 };
@@ -69,7 +69,7 @@ export function applyGlossary(text, terms) {
   return out;
 }
 
-function editDistance(a, b) {
+export function editDistance(a, b) {
   const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
   for (let j = 1; j <= b.length; j++) dp[0][j] = j;
   for (let i = 1; i <= a.length; i++) {
@@ -102,7 +102,7 @@ export function normalise(text) {
     .trim();
 }
 
-function splitSentences(text) {
+export function splitSentences(text) {
   const protectedText = text.replace(/(\d)\.(\d)/g, '$1․$2').replace(/\b(e\.g|i\.e|etc|vs|approx|dept|no)\./gi, m => m.replace('.', '․'));
   const parts = protectedText.match(/[^.!?]+[.!?]*/g) || [];
   return parts.map(p => p.replace(/․/g, '.').trim()).filter(Boolean);
@@ -191,7 +191,7 @@ function splitCompound(bullet) {
   return [cleanBullet(left), ...splitCompound(cleanBullet(right))];
 }
 
-const OBJECT_RE = /\b(?:on|draft(?:ed|ing)|prepar(?:ed|ing)|finali[sz](?:ed|ing)|complet(?:ed|ing)|wr(?:ote|iting)|review(?:ed|ing)|shar(?:ed|ing)|submitt(?:ed|ing)|sen(?:t|ding)|develop(?:ed|ing)|updat(?:ed|ing)|revis(?:ed|ing)|start(?:ed|ing)|design(?:ed|ing)) (the|our|a|an) ([\w&-]+(?: [\w&-]+){0,3}?)(?= for\b| to\b| with\b| in\b| by\b| that\b| which\b|,|\.|;|$)/i;
+const OBJECT_RE = /\b(?:on|finish(?:ed|ing)|draft(?:ed|ing)|prepar(?:ed|ing)|finali[sz](?:ed|ing)|complet(?:ed|ing)|wr(?:ote|iting)|review(?:ed|ing)|shar(?:ed|ing)|submitt(?:ed|ing)|sen(?:t|ding)|develop(?:ed|ing)|updat(?:ed|ing)|revis(?:ed|ing)|start(?:ed|ing)|design(?:ed|ing)) (the|our|a|an) ([\w&-]+(?: [\w&-]+){0,3}?)(?= for\b| to\b| with\b| in\b| by\b| that\b| which\b| and\b|,|\.|;|$)/i;
 
 const DELIVERABLES = 'briefing note|concept note|policy brief|position paper|proposal|report|plan|workshop|training|meeting|survey|budget|presentation|strategy|framework|review|assessment|curriculum|module|event|visit|session|contract|agreement|launch|pilot|study|toolkit|guidelines|handbook|agenda|roadmap|website|platform|campaign|conference|application|submission|evaluation|baseline|document|draft|memo|newsletter|tender';
 const TITLE_RE = new RegExp(`\\b((?:[\\w&-]+ ){0,2}?(?:${DELIVERABLES}))((?: (?:for|on|with|to|about) (?:the )?[A-Z][\\w&'-]*(?: (?:of |and |for )?[A-Z][\\w&'-]*)*))?`, 'g');
@@ -201,7 +201,8 @@ export function predictTitle(transcript, sections, projectTerms = []) {
   const text = normalise(polish(transcript || ''));
   let best = null;
   for (const m of text.matchAll(TITLE_RE)) {
-    let head = m[1].replace(/^(the|a|an|our|my|this|that|some|on|of|in|for|to|with) /i, '').replace(/^(the|a|an|our|my) /i, '');
+    let head = m[1];
+    for (let i = 0; i < 3; i++) head = head.replace(/^(the|a|an|our|my|this|that|some|on|of|in|for|to|with|held|met|had|did|made|\w+ed|\w+ing) /i, '');
     if (/^(next|last|this) /i.test(head)) continue;
     const score = (m[2] ? 3 : 0) + (/[A-Z]/.test(m[1]) ? 1 : 0) + head.split(' ').length * 0.1;
     if (!best || score > best.score) best = { score, title: (head + (m[2] || '')).trim() };
@@ -254,9 +255,9 @@ export function summarise(transcript, { tags = [], glossary = [], projectTerms =
       else section = (!singleTag && weakCue(lower)) || current;
 
       // Resolve "it" to the work item named earlier: "present it" -> "present the briefing note".
-      const resolved = lastObject ? clause.replace(new RegExp(`\\b(${ACTION_VERBS}|present|discuss|send|share)( it)\\b`, 'i'), `$1 ${lastObject}`) : clause;
       const obj = clause.match(OBJECT_RE);
       if (obj) lastObject = `the ${obj[2]}`;
+      const resolved = lastObject ? clause.replace(new RegExp(`\\b((?:${ACTION_VERBS}|present|discuss|send|share)(?:d|ed)?)( it)\\b`, 'i'), `$1 ${lastObject}`) : clause;
       const bullet = cleanBullet(resolved);
       if (!bullet || wordCount(bullet) < 2 || SKIP.test(bullet)) continue;
       for (const b of splitCompound(bullet)) if (b && wordCount(b) >= 2) result[section].push(b);
@@ -266,13 +267,16 @@ export function summarise(transcript, { tags = [], glossary = [], projectTerms =
 }
 
 // Word-overlap similarity used to merge near-duplicate bullets across notes.
-function tokens(s) { return new Set(s.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 2)); }
+// Common words are ignored so two different actions on the same item
+// ("Finished the design", "Shared the design") are both kept.
+const STOP = new Set('in on of to at by an as is it we be or the and for with from that this have has had was were are our their into onto about over under next week will been also than then them they its'.split(' '));
+function tokens(s) { return new Set(s.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 1 && !STOP.has(w))); }
 export function similar(a, b) {
   const A = tokens(a), B = tokens(b);
   if (!A.size || !B.size) return a.toLowerCase() === b.toLowerCase();
   let inter = 0;
   A.forEach(w => { if (B.has(w)) inter++; });
-  return inter / Math.min(A.size, B.size) >= 0.8;
+  return inter / (A.size + B.size - inter) >= 0.7;
 }
 
 export function stripDashes(s) {

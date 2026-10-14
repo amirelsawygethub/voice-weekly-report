@@ -34,7 +34,7 @@
       <div class="card hero">
         <img src="icons/icon-192.png" alt="" width="72" height="72">
         <h2>Welcome</h2>
-        <p>Record short voice notes during the week. The app turns them into a business-formal weekly report. You never need to type the report.</p>
+        <p>Record short voice notes during the week. The app works out which project you are talking about and turns your notes into a business-formal weekly report. No typing, no forms.</p>
       </div>
       <div class="card">
         <label class="field">Your full name
@@ -42,12 +42,6 @@
         </label>
         <label class="field">Report recipient (optional)
           <input id="ob-recipient" type="email" autocomplete="off" placeholder="manager@organisation.org">
-        </label>
-        <label class="field">First project name
-          <input id="ob-project" placeholder="e.g. Digital Classroom Rollout" required>
-        </label>
-        <label class="field">Project code (optional)
-          <input id="ob-code" placeholder="e.g. PRJ-104">
         </label>
         <button class="btn primary block" id="ob-continue">Continue</button>
       </div>
@@ -79,14 +73,6 @@
 
     <!-- Record -->
     <section class="view" id="view-record" hidden>
-      <div class="card">
-        <label class="field">Project
-          <select id="rec-project"></select>
-        </label>
-        <div class="field">Tags (optional)
-          <div class="chips" id="rec-tags"></div>
-        </div>
-      </div>
       <div class="recorder card">
         <canvas id="rec-wave" height="80" aria-hidden="true"></canvas>
         <div class="timer" id="rec-timer" aria-live="polite">0:00</div>
@@ -104,13 +90,15 @@
         </div>
       </div>
       <details class="card prompt-card" id="rec-prompts" open>
-        <summary>Cover these four points</summary>
+        <summary>Tips for a strong note</summary>
         <ol class="prompts">
-          <li><strong>"This week I achieved..."</strong> completed tasks and progress</li>
-          <li><strong>"The challenges were..."</strong> obstacles, delays, risks</li>
-          <li><strong>"Next week I will..."</strong> your top priorities</li>
-          <li><strong>"I need support with..."</strong> or "No support needed"</li>
+          <li><strong>Name the project</strong> as you start, for example "On the Edu Nexus project..."</li>
+          <li><strong>What you achieved</strong> this week</li>
+          <li><strong>Any challenges</strong> or delays</li>
+          <li><strong>Your priorities</strong> for next week</li>
+          <li><strong>Support you need</strong>, if any</li>
         </ol>
+        <p class="fine">Covering several projects? Just say "Moving to..." before the next one.</p>
       </details>
     </section>
 
@@ -185,6 +173,7 @@
       </div>
       <div class="card">
         <h3>Projects</h3>
+        <p class="muted">Detected automatically from your notes. Tap a project to correct its name or add key terms that are often mis-heard. Renaming a project to an existing name merges them.</p>
         <div id="set-projects" class="list"></div>
         <button class="btn secondary block" id="set-add-project">Add project</button>
       </div>
@@ -249,17 +238,18 @@
       <div class="card">
         <h3>Before you record</h3>
         <ul class="plain">
-          <li>Select the correct project. Record a separate note for each project.</li>
+          <li>Say the project name as you start, for example "On the Edu Nexus project...". You never need to select it.</li>
+          <li>Several projects in one note is fine. Say "Moving to..." before each new one.</li>
           <li>Find a quiet place and hold the phone about 20 cm from your mouth.</li>
         </ul>
       </div>
       <div class="card">
-        <h3>Structure your note around four prompts</h3>
+        <h3>Cover these points (only what applies)</h3>
         <ol class="prompts">
           <li><strong>"This week I achieved..."</strong> Completed tasks, milestones and measurable progress.</li>
           <li><strong>"The challenges were..."</strong> Obstacles, delays or risks.</li>
           <li><strong>"Next week I will..."</strong> Your top priorities.</li>
-          <li><strong>"I need support with..."</strong> What help you need and from whom. If none, say "No support needed."</li>
+          <li><strong>"I need support with..."</strong> What help you need and from whom. Skip it if you need none.</li>
         </ol>
       </div>
       <div class="card">
@@ -269,7 +259,6 @@
           <li>Say project names, client names and acronyms clearly and in full.</li>
           <li>Include numbers and dates, for example "12 schools" or "by 20 October".</li>
           <li>Keep each note under 3 minutes. Several short notes give better results than one long note.</li>
-          <li>Use a tag if a note covers only one topic, such as Challenges.</li>
           <li>To correct a report, record a follow-up note such as "Correction for priorities: the steering committee meeting moved to Tuesday."</li>
         </ul>
       </div>

@@ -85,10 +85,9 @@ export function reportToText(report) {
   const lines = ['Weekly Report', `Name: ${report.name}`, `Week: ${report.week}`];
   for (const block of report.projects) {
     lines.push('', `Project: ${projectTitle(block.project)}`);
-    for (const s of block.sections) {
+    for (const s of block.sections.filter(x => x.items.length)) {
       lines.push('', s.label);
-      if (s.items.length) s.items.forEach(i => lines.push(`• ${i}`));
-      else lines.push(`• ${s.empty}`);
+      s.items.forEach(i => lines.push(`• ${i}`));
     }
   }
   return stripDashes(lines.join('\n'));
@@ -100,9 +99,10 @@ export function reportToHTML(report) {
   let html = `<h2>Weekly Report</h2><div class="meta"><strong>Name:</strong> ${esc(report.name)}<br><strong>Week:</strong> ${esc(report.week)}</div>`;
   for (const block of report.projects) {
     html += `<h3 class="project">Project: ${esc(projectTitle(block.project))}</h3>`;
-    for (const s of block.sections) {
+    // Sections with nothing reported are left out rather than filled with placeholders.
+    for (const s of block.sections.filter(x => x.items.length)) {
       html += `<h4>${esc(s.label)}</h4><ul>`;
-      html += s.items.length ? s.items.map(i => `<li>${esc(i)}</li>`).join('') : `<li class="none">${esc(s.empty)}</li>`;
+      html += s.items.map(i => `<li>${esc(i)}</li>`).join('');
       html += '</ul>';
       if (s.omitted) html += `<div class="fine">${s.omitted} earlier point(s) condensed. Delete or re-record notes to adjust.</div>`;
     }

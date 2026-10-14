@@ -60,6 +60,8 @@ const NOISE = [
 // Hedges at the start of a later sentence (no look-behind, for older Safari).
 const HEDGE_AFTER_STOP = /([.!?]\s+)(i think|i guess|i believe|i suppose|i feel like)\s+(that\s+)?/gi;
 
+const RUN_ON = /([a-z0-9])\s+(?=(?:the (?:main |key |biggest |major |other )?(?:challenges?|issues?|problems?|obstacles?|risks?) (?:is|was|are|were|we faced)|next week,? (?:i|we)|(?:i|we) (?:also )?need (?:some )?(?:support|help)|moving (?:on )?to|on the other project|as for)\b)/gi;
+
 const FILLERS = /\b(um+|uh+|erm+|hmm+|ah+|you know|i mean|basically|actually|kind of|sort of|literally)\b,?\s*/gi;
 
 // Meta-talk: openings and sign-offs about the note itself rather than the work.
@@ -96,6 +98,9 @@ export function polish(text) {
   // Immediate repetitions: "the the", "we we we", "on on the"
   s = s.replace(/\b(\w+)(?:[\s,]+\1\b)+/gi, '$1');
   s = s.replace(/\b(\w+ \w+)(?:,?\s+\1\b)+/gi, '$1');
+  // Speech recognition often runs sentences together; restore a break before
+  // phrases that start a new report point ("...with EDC the main challenge is...").
+  s = s.replace(RUN_ON, '$1. ');
   for (const re of NOISE) s = s.replace(re, ' ');
   s = s.replace(HEDGE_AFTER_STOP, '$1');
   for (const [re, rep] of CASUAL) s = s.replace(re, rep);
@@ -115,7 +120,7 @@ export function polish(text) {
 // Proper names in the transcript that are not yet in the project's key terms.
 // These are the words most likely to be mis-heard, so the app asks the
 // speaker to confirm them once.
-const NOT_NAMES = new Set(('I The A An This That These Those We Our My It Its Next Last Also And But So Then Now Today ' +
+export const NOT_NAMES = new Set(('I The A An This That These Those We Our My It Its Next Last Also And But So Then Now Today ' +
   'Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February March April May June July August September ' +
   'October November December OK Here There What When Where Which Who How Achievements Challenges Priorities Support ' +
   'Project Team Ministry Office Department Week Weekly Correction Update').split(' '));

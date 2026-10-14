@@ -24,7 +24,7 @@ After installation, the app opens full screen from the home screen like any othe
 
 On first use:
 
-1. Enter your name and your first project.
+1. Enter your name. There is nothing else to set up: projects are detected from your notes.
 2. Tap **Add to calendar** to set the Thursday reminder.
 3. Record a note. The speech model (about 40 MB) downloads once, ideally over Wi-Fi. After that, transcription works offline.
 
@@ -32,6 +32,7 @@ On first use:
 
 ```
 Microphone ─► Encrypted audio (on device) ─► Whisper speech-to-text (on device)
+          ─► Automatic analysis: which project(s), and achievements / challenges / priorities / support
           ─► Layer 1: business-writing clean-up (on device, always)
           ─► Layer 2: AI business-writing editor (Claude, optional)
           ─► Weekly report ─► optional AI polish of final wording ─► Share / Email / PDF
@@ -41,6 +42,7 @@ Microphone ─► Encrypted audio (on device) ─► Whisper speech-to-text (on 
 |---|---|
 | Recording | MediaRecorder API (WebM/Opus on Android, MP4/AAC on iOS), up to 5 minutes per note, with pause and resume |
 | Speech-to-text | OpenAI Whisper (`whisper-tiny.en` or `whisper-base.en`) running in a Web Worker via Transformers.js 3.8.1 |
+| Automatic project detection | No project or tag selection. The app finds the project(s) named in the note ("On the Edu Nexus project...", "Moving to Jusoor...", or a known project's name or code), splits a multi-project note into one entry per project, learns new project names, and matches later mentions even when mis-heard. Correcting a name in Settings teaches the app that spelling. |
 | Editing layer 1 (on device) | Removes fillers, false starts, repeated words, hedges and casual phrasing ("gonna", "touch base", "ASAP"), then sorts sentences into the four sections and rewrites them as short bullets |
 | Editing layer 2 (optional) | Claude (`claude-opus-5-5`) rewrites each transcript into business-formal bullets: keeps every fact and the main idea, removes noise, turns incoherent passages into clear statements, keeps only self-corrected versions, and leaves out anything too garbled to understand rather than guessing. A weekly pass merges overlaps and applies later corrections. |
 | Report generation | Deterministic rules that detect the four spoken prompts, remove filler words, rewrite sentences as concise bullets, merge duplicates and preserve project terminology |
@@ -85,14 +87,14 @@ Data is stored per device and per browser. Installing the app to the home screen
 
 ## User guidelines for voice notes
 
-Structure each note around four prompts:
+Just speak naturally; nothing needs to be selected. For the best results, name the project as you start, say "Moving to..." before switching to another project, and cover whatever applies of:
 
 1. **"This week I achieved..."** Completed tasks, milestones and measurable progress.
 2. **"The challenges were..."** Obstacles, delays or risks.
 3. **"Next week I will..."** Top priorities.
-4. **"I need support with..."** What help you need, and from whom. If none, say "No support needed."
+4. **"I need support with..."** What help you need, and from whom. Skip it if none.
 
-Tips: select the correct project first, speak in complete sentences, say names and acronyms clearly, and keep each note under 3 minutes. Add key names to the project's **Key terms** in Settings so they are always spelled correctly.
+Tips: speak in complete sentences, say names and acronyms clearly, and keep each note under 3 minutes. Sections with nothing reported are left out of the report. Add key names to a project's **Key terms** in Settings so they are always spelled correctly.
 
 ## Deploying (GitHub Pages)
 
