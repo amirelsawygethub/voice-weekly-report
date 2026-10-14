@@ -1,0 +1,22 @@
+{
+  "name": "Voice Weekly Report",
+  "short_name": "Weekly Report",
+  "description": "Record voice notes during the week and receive an automatically generated bullet-point weekly report.",
+  "id": "./",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F7FA",
+  "theme_color": "#1F3A5F",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Record a note", "short_name": "Record", "url": "./?action=record", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "View weekly report", "short_name": "Report", "url": "./?action=report", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
