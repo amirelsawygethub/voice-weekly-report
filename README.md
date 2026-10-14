@@ -13,7 +13,7 @@ No typing is required. Speech is transcribed **on the phone itself**, and the re
 
 Open the app link in your phone's browser:
 
-**https://YOUR-GITHUB-USERNAME.github.io/voice-weekly-report/**
+**https://amirelsawygethub.github.io/voice-weekly-report/**
 
 | Platform | Steps |
 |---|---|
@@ -68,7 +68,7 @@ Turn it on in **Settings > AI business-writing editor**. If it is off, offline o
 **Deploying the team proxy (Cloudflare Workers, free tier):**
 
 1. Create a Worker in the Cloudflare dashboard and paste in `proxy/cloudflare-worker.js`.
-2. Under **Settings > Variables**, add the secrets `ANTHROPIC_API_KEY` and `TEAM_ACCESS_CODE`, and the variable `ALLOWED_ORIGINS` set to `https://<username>.github.io`.
+2. Under **Settings > Variables**, add the secrets `ANTHROPIC_API_KEY` and `TEAM_ACCESS_CODE`, and the variable `ALLOWED_ORIGINS` set to `https://amirelsawygethub.github.io`.
 3. Share the Worker URL (`https://<name>.<account>.workers.dev`) and the access code with colleagues.
 
 The proxy accepts only text-editing requests from the app's site, requires the access code, pins the model and caps request size. The app's Content Security Policy allows `*.workers.dev` and `api.anthropic.com`. If you use a custom proxy domain, add it to `connect-src` in `index.html`.
