@@ -9,7 +9,7 @@ import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.3.1';
 // Bump when the on-device editing rules change, so older notes are re-edited.
 const RULES_VERSION = 5;
 const AUDIO_RETENTION_DAYS = 90;
@@ -33,7 +33,7 @@ const state = {
 };
 
 const DEFAULT_SETTINGS = {
-  profile: { name: '', recipient: '' },
+  profile: { name: '' },
   weekStart: 0,
   reminderTime: '17:00',
   model: DEFAULT_MODEL,
@@ -370,7 +370,6 @@ const RENDER = {
   async settings() {
     const s = state.settings;
     $('#set-name').value = s.profile.name;
-    $('#set-recipient').value = s.profile.recipient || '';
     $('#set-weekstart').value = String(s.weekStart);
     $('#set-time').value = s.reminderTime;
     $('#set-model').value = s.model;
@@ -731,7 +730,7 @@ function wire() {
   $('#ob-continue').onclick = async () => {
     const name = $('#ob-name').value.trim();
     if (!name) { toast('Please enter your name.'); return; }
-    state.settings.profile = { name, recipient: $('#ob-recipient').value.trim() };
+    state.settings.profile = { name };
     state.settings.onboarded = true;
     await saveSettings();
     try { await navigator.storage?.persist?.(); } catch { /* optional */ }
@@ -799,11 +798,10 @@ function wire() {
 
   // Settings
   const saveProfile = () => {
-    state.settings.profile = { name: $('#set-name').value.trim(), recipient: $('#set-recipient').value.trim() };
+    state.settings.profile = { name: $('#set-name').value.trim() };
     saveSettings();
   };
   $('#set-name').onchange = saveProfile;
-  $('#set-recipient').onchange = saveProfile;
   $('#set-weekstart').onchange = e => { state.settings.weekStart = Number(e.target.value); saveSettings(); };
   $('#set-time').onchange = e => {
     state.settings.reminderTime = e.target.value || '17:00';
@@ -973,8 +971,8 @@ async function shareReport() {
     try { await navigator.share({ title, text }); return; }
     catch (err) { if (err.name === 'AbortError') return; }
   }
-  const to = state.settings.profile.recipient || '';
-  location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(text)}`;
+  // No stored recipient: the mail app opens and the user picks who to send it to.
+  location.href = `mailto:?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(text)}`;
 }
 
 /* ---------- AI editor helpers ---------- */
