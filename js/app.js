@@ -2,12 +2,15 @@ import * as db from './db.js';
 import { encryptBytes, decryptBytes, encryptJSON, decryptJSON, resetKeyCache } from './crypto.js';
 import { Recorder, isSupported, MAX_SECONDS } from './recorder.js';
 import { transcribe, blobToPCM, loadModel, onProgress, DEFAULT_MODEL } from './transcriber.js';
-import { SECTIONS, summarise, emptySections } from './summarize.js';
+import { SECTIONS, summarise, emptySections, predictTitle } from './summarize.js';
+import { coach } from './coach.js';
 import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML, reportToText, projectTitle, esc } from './report.js';
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
+// Bump when the on-device editing rules change, so older notes are re-edited.
+const RULES_VERSION = 2;
 const AUDIO_RETENTION_DAYS = 90;
 const TAGS = SECTIONS.map(s => s.tag);
 const APP_URL = new URL('./', location.href).href;
@@ -240,8 +243,8 @@ const RENDER = {
       ? notes.map(n => `
         <button class="item" data-note="${esc(n.id)}">
           <div class="grow">
-            <div class="title">${esc(projectName(n.projectId))}</div>
-            <div class="sub">${esc(formatDate(n.createdAt))} · ${esc(firstBullet(n))}</div>
+            <div class="title">${esc(n.status === 'done' && n.title ? n.title : firstBullet(n))}</div>
+            <div class="sub">${esc(projectName(n.projectId))} · ${esc(formatDate(n.createdAt))}</div>
           </div>
           ${statusPill(n)}
         </button>`).join('')
@@ -262,7 +265,8 @@ const RENDER = {
     const preset = new Set(parent ? parent.tags : (opts.tags || []));
     $('#rec-tags').innerHTML = TAGS.map(t => `<button type="button" class="chip" aria-pressed="${preset.has(t)}" data-tag="${esc(t)}">${esc(t)}</button>`).join('');
     $('#rec-tags').closest('.field').hidden = !!parent;
-    $('#rec-hint').textContent = opts.mode === 'followup' ? 'Adding to an existing note' : opts.mode === 'rerecord' ? 'This will replace the existing note' : `Maximum ${MAX_SECONDS / 60} minutes per note`;
+    $('#rec-hint').textContent = opts.mode === 'followup' && opts.tags?.length ? `Adding ${opts.tags.join(', ').toLowerCase()} to this note`
+      : opts.mode === 'followup' ? 'Adding to an existing note' : opts.mode === 'rerecord' ? 'This will replace the existing note' : `Maximum ${MAX_SECONDS / 60} minutes per note`;
     resetRecorderUI();
     if (!isSupported()) {
       $('#rec-hint').textContent = 'Voice recording is not supported in this browser. On iPhone, use Safari. On Android, use Chrome.';
@@ -273,18 +277,22 @@ const RENDER = {
   async note({ id }) {
     const note = state.notes.find(n => n.id === id);
     if (!note) return show('home', {}, { replace: true });
-    $('#note-project').textContent = projectName(note.projectId);
-    $('#note-date').textContent = `${formatDate(note.createdAt)} · ${Math.max(1, Math.round((note.duration || 0) / 60))} min${note.tags?.length ? ' · ' + note.tags.join(', ') : ''}`;
+    const done = note.status === 'done' && note.sections;
+    $('#note-project').textContent = projectTitle(projectById(note.projectId) || { name: 'Unassigned project' });
+    $('#note-title').textContent = done ? (note.title || 'Weekly update') : 'Processing note';
+    $('#note-date').textContent = `${formatDate(note.createdAt)} · ${Math.max(1, Math.round((note.duration || 0) / 60))} min`;
     $('#note-status').outerHTML = statusPill(note).replace('<span', '<span id="note-status"');
 
     const box = $('#note-sections');
-    if (note.status === 'done' && note.sections) {
+    box.classList.toggle('card', !!done);
+    if (done) {
       box.innerHTML = SECTIONS.map(s => {
         const items = note.sections[s.key] || [];
         const none = (s.key === 'support' && note.sections.none?.support) || (s.key === 'challenges' && note.sections.none?.challenges);
-        if (!items.length && !none) return '';
-        return `<div class="card sec-card"><h4>${esc(s.label)}</h4><ul>${items.length ? items.map(i => `<li>${esc(i)}</li>`).join('') : `<li>${esc(s.empty)}</li>`}</ul></div>`;
-      }).join('') || '<div class="empty">No report content was detected. Please re-record using the four prompts in the Guide.</div>';
+        if (items.length) return `<div class="sec"><h4>${esc(s.label)}</h4><ul>${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>`;
+        if (none) return `<div class="sec"><h4>${esc(s.label)}</h4><ul><li>${esc(s.empty)}</li></ul></div>`;
+        return `<div class="sec missing"><h4>${esc(s.label)}</h4><p>Not mentioned. <button class="link-btn" data-addtag="${esc(s.tag)}">Add by voice</button></p></div>`;
+      }).join('');
     } else if (note.status === 'review') {
       box.innerHTML = '<div class="banner warn">Very little speech was detected. Please re-record in a quieter place, closer to the microphone.</div>';
     } else if (note.status === 'error') {
@@ -293,11 +301,18 @@ const RENDER = {
       box.innerHTML = `<div class="card"><p class="muted">${esc(firstBullet(note))}. You can leave this screen; the note will be ready shortly.</p><div class="progress"><div style="width:${state.model.active ? state.model.pct : 15}%"></div></div></div>`;
     }
     $('#note-transcript').textContent = note.transcript || 'Not yet available.';
-    const edited = note.status === 'done';
-    $('#note-editor').textContent = !edited ? '' : note.editor === 'ai'
-      ? 'Edited by the AI business-writing editor.'
-      : `Standard on-device edit.${note.aiError ? ' ' + note.aiError : ''}`;
-    $('#note-ai').hidden = !(edited && note.editor !== 'ai' && ai.isConfigured(state.ai));
+
+    const aiOn = ai.isConfigured(state.ai);
+    $('#note-editor').innerHTML = !done ? '' : note.editor === 'ai'
+      ? '<span class="badge ai">AI edited</span><span>Wording refined by the AI business-writing editor.</span>'
+      : `<span class="badge">On-device edit</span>${note.aiError ? `<span>${esc(note.aiError)}</span>` : ''}${aiOn ? '' : '<button class="link-btn" data-go="settings">Turn on the AI editor for sharper wording</button>'}`;
+    $('#note-ai').hidden = !(done && note.editor !== 'ai' && aiOn);
+
+    const tips = done ? coach(note, projectById(note.projectId)) : [];
+    $('#note-coach').hidden = !tips.length;
+    $('#note-tips').innerHTML = tips.map(t => `<li><span>${esc(t.text)}</span>${
+      t.tag ? `<button class="chip" data-addtag="${esc(t.tag)}">${esc(t.action)}</button>`
+      : t.term ? `<button class="chip" data-addterm="${esc(t.term)}">${esc(t.action)}</button>` : ''}</li>`).join('');
 
     const audio = $('#note-audio');
     if (audio.dataset.url) URL.revokeObjectURL(audio.dataset.url);
@@ -499,7 +514,7 @@ async function finishRecording() {
   }
   if (note && opts.mode === 'followup') {
     note.audioIds = [...(note.audioIds || []), audioId];
-    note.segments = [...(note.segments || []), { audioId, text: null }];
+    note.segments = [...(note.segments || []), { audioId, text: null, tags: opts.tags || [] }];
     note.duration = (note.duration || 0) + result.duration;
   } else if (note && opts.mode === 'rerecord') {
     for (const id of note.audioIds || []) await db.del('audio', id);
@@ -580,11 +595,39 @@ async function processNote(note) {
 
 function resummarise(note) {
   const project = projectById(note.projectId) || {};
+  const opts = { glossary: project.glossary || [], projectTerms: [project.name, project.code].filter(Boolean) };
   note.transcript = (note.segments || []).map(s => s.text || '').join(' ').trim();
-  note.sections = note.transcript
-    ? summarise(note.transcript, { tags: note.tags || [], glossary: project.glossary || [], projectTerms: [project.name, project.code].filter(Boolean) })
-    : emptySections();
+  // Each recording is read with its own intent, so "Add challenges" clips land in Challenges.
+  const merged = emptySections();
+  for (const seg of note.segments || []) {
+    if (!seg.text) continue;
+    const part = summarise(seg.text, { ...opts, tags: seg.tags?.length ? seg.tags : note.tags || [] });
+    for (const s of SECTIONS) merged[s.key].push(...part[s.key]);
+    merged.none.support ||= part.none.support;
+    merged.none.challenges ||= part.none.challenges;
+  }
+  note.sections = merged;
+  note.title = note.transcript ? predictTitle(note.transcript, merged, opts.projectTerms) : '';
   note.editor = 'standard';
+  note.aiTips = [];
+  note.rulesVersion = RULES_VERSION;
+}
+
+function transcriptForAi(note) {
+  return (note.segments || []).filter(s => s.text).map(s =>
+    s.tags?.length ? `[Follow-up recording about: ${s.tags.join(', ')}] ${s.text}` : s.text).join('\n\n');
+}
+
+async function addKeyTerm(projectId, term) {
+  const project = projectById(projectId);
+  if (!project) return;
+  project.glossary = [...new Set([...(project.glossary || []), term])];
+  await db.put('projects', project);
+  for (const note of state.notes.filter(n => n.projectId === projectId && n.status === 'done' && n.editor !== 'ai')) {
+    resummarise(note);
+    await saveNote(note);
+  }
+  toast(`"${term}" added to key terms. Edit its spelling in Settings if needed.`, 3500);
 }
 
 // Second editing layer: Claude rewrites the transcript as business-formal
@@ -592,7 +635,10 @@ function resummarise(note) {
 async function aiEditNote(note) {
   try {
     const project = projectById(note.projectId) || { name: 'Unassigned project', glossary: [] };
-    note.sections = await ai.editNote(state.ai, { transcript: note.transcript, tags: note.tags || [], project });
+    const { title, tips, ...sections } = await ai.editNote(state.ai, { transcript: transcriptForAi(note), tags: note.tags || [], project });
+    note.sections = sections;
+    if (title) note.title = title;
+    note.aiTips = tips || [];
     note.editor = 'ai';
     note.aiError = '';
   } catch (err) {
@@ -642,6 +688,13 @@ function wire() {
     if (go) show(go.dataset.go, { mode: 'new' });
     const noteBtn = e.target.closest('[data-note]');
     if (noteBtn) show('note', { id: noteBtn.dataset.note });
+    const addTag = e.target.closest('[data-addtag]');
+    if (addTag && state.view === 'note') show('record', { mode: 'followup', noteId: state.viewOpts.id, tags: [addTag.dataset.addtag] });
+    const addTerm = e.target.closest('[data-addterm]');
+    if (addTerm && state.view === 'note') {
+      const note = state.notes.find(n => n.id === state.viewOpts.id);
+      if (note) { await addKeyTerm(note.projectId, addTerm.dataset.addterm); RENDER.note({ id: note.id }); }
+    }
     const projBtn = e.target.closest('[data-project]');
     if (projBtn) editProject(projectById(projBtn.dataset.project));
     if (e.target.id === 'do-install' && state.installPrompt) {
@@ -966,6 +1019,14 @@ async function boot() {
   await enforceRetention().catch(() => {});
   // Notes interrupted mid-processing (app closed) are resumed.
   state.notes.filter(n => n.status === 'processing').forEach(n => { n.status = 'queued'; });
+  for (const n of state.notes.filter(n => n.status === 'done' && n.editor !== 'ai' && (n.rulesVersion || 1) < RULES_VERSION)) {
+    resummarise(n);
+    await saveNote(n).catch(() => {});
+  }
+  for (const n of state.notes.filter(n => n.status === 'done' && !n.title && n.transcript)) {
+    n.title = predictTitle(n.transcript, n.sections);
+    await saveNote(n).catch(() => {});
+  }
 
   if (!state.settings.onboarded) {
     show('onboarding', {}, { replace: true });

@@ -1,7 +1,7 @@
 // Converts a voice-note transcript into concise, business-formal bullets
 // grouped into the four mandatory weekly report sections. Runs entirely on
 // the device with deterministic rules, so no text is sent to any service.
-import { polish } from './editor.js';
+import { polish, stripMeta } from './editor.js';
 
 export const SECTIONS = [
   { key: 'achievements', label: 'Achievements / Progress', tag: 'Achievements', empty: 'No progress reported this week.' },
@@ -108,9 +108,12 @@ function splitSentences(text) {
   return parts.map(p => p.replace(/․/g, '.').trim()).filter(Boolean);
 }
 
+const FUTURE_JOIN = /,?\s+(?:that|which|and|so|then)\s+(?=(?:i|we|they)\s+(?:will|'ll|shall|plan to|are going to|am going to|intend to|aim to)\b)|,\s+(?=(?:i|we)\s+(?:will|'ll)\b)/i;
+
 function splitClauses(sentence) {
   return sentence
     .split(/;\s+|,?\s+\b(?:but|however|although|whereas)\b,?\s+/i)
+    .flatMap(c => c.split(FUTURE_JOIN))
     .map(s => s.trim())
     .filter(Boolean);
 }
@@ -139,7 +142,11 @@ const LEADS = [
   /^(correction|update|amendment)( for| to| on)? [a-z ]*?:\s*/i
 ];
 
+const PROGRESSIVE = { working: 'Worked', focusing: 'Focused', preparing: 'Continued preparing', drafting: 'Continued drafting', reviewing: 'Reviewed', developing: 'Continued developing', finalising: 'Finalising', finalizing: 'Finalizing', coordinating: 'Coordinated', following: 'Followed' };
+
 const PRONOUN_LEADS = [
+  [/^(i|we) (was|were) (working|focusing|preparing|drafting|reviewing|developing|finalising|finalizing|coordinating|following)\b\s*/i, (m, p, v, ing) => `${PROGRESSIVE[ing.toLowerCase()]} `],
+  [/^(was|were) (working|focusing|preparing|drafting|reviewing|developing|coordinating|following)\b\s*/i, (m, v, ing) => `${PROGRESSIVE[ing.toLowerCase()]} `],
   [/^(i|we)( am| are|'m|'re)?( still)? wait(ing)? (for|on)\s+/i, 'Awaiting '],
   [/^(i|we)('ll| will| shall| am going to| are going to|'m going to|'re going to| plan to| intend to| need to| want to| aim to| hope to| expect to| would like to)( also)?\s+/i, ''],
   [/^(i|we) (was|were) able to\s+/i, 'Managed to '],
@@ -184,6 +191,31 @@ function splitCompound(bullet) {
   return [cleanBullet(left), ...splitCompound(cleanBullet(right))];
 }
 
+const OBJECT_RE = /\b(?:on|draft(?:ed|ing)|prepar(?:ed|ing)|finali[sz](?:ed|ing)|complet(?:ed|ing)|wr(?:ote|iting)|review(?:ed|ing)|shar(?:ed|ing)|submitt(?:ed|ing)|sen(?:t|ding)|develop(?:ed|ing)|updat(?:ed|ing)|revis(?:ed|ing)|start(?:ed|ing)|design(?:ed|ing)) (the|our|a|an) ([\w&-]+(?: [\w&-]+){0,3}?)(?= for\b| to\b| with\b| in\b| by\b| that\b| which\b|,|\.|;|$)/i;
+
+const DELIVERABLES = 'briefing note|concept note|policy brief|position paper|proposal|report|plan|workshop|training|meeting|survey|budget|presentation|strategy|framework|review|assessment|curriculum|module|event|visit|session|contract|agreement|launch|pilot|study|toolkit|guidelines|handbook|agenda|roadmap|website|platform|campaign|conference|application|submission|evaluation|baseline|document|draft|memo|newsletter|tender';
+const TITLE_RE = new RegExp(`\\b((?:[\\w&-]+ ){0,2}?(?:${DELIVERABLES}))((?: (?:for|on|with|to|about) (?:the )?[A-Z][\\w&'-]*(?: (?:of |and |for )?[A-Z][\\w&'-]*)*))?`, 'g');
+
+// Predicts a short title naming the note's main topic.
+export function predictTitle(transcript, sections, projectTerms = []) {
+  const text = normalise(polish(transcript || ''));
+  let best = null;
+  for (const m of text.matchAll(TITLE_RE)) {
+    let head = m[1].replace(/^(the|a|an|our|my|this|that|some|on|of|in|for|to|with) /i, '').replace(/^(the|a|an|our|my) /i, '');
+    if (/^(next|last|this) /i.test(head)) continue;
+    const score = (m[2] ? 3 : 0) + (/[A-Z]/.test(m[1]) ? 1 : 0) + head.split(' ').length * 0.1;
+    if (!best || score > best.score) best = { score, title: (head + (m[2] || '')).trim() };
+  }
+  let title = best ? best.title : '';
+  if (!title) {
+    const first = SECTIONS.map(s => (sections && sections[s.key]) || []).flat()[0] || '';
+    title = first.replace(/[.!?]$/, '').split(/\s+/).slice(0, 7).join(' ');
+  }
+  if (!title) return 'Weekly update';
+  title = title.replace(/[.,;:]$/, '');
+  return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
 function isProjectMention(s, projectTerms) {
   const lower = s.toLowerCase().replace(/[.!?]$/, '');
   if (wordCount(lower) > 8) return false;
@@ -204,8 +236,10 @@ export function summarise(transcript, { tags = [], glossary = [], projectTerms =
   const singleTag = tagKeys.length === 1;
   let current = tagKeys[0] || 'achievements';
 
-  for (const sentence of splitSentences(text)) {
-    if (SKIP.test(sentence) || isProjectMention(sentence, projectTerms)) continue;
+  let lastObject = '';
+  for (const rawSentence of splitSentences(text)) {
+    const sentence = stripMeta(rawSentence);
+    if (!sentence || wordCount(sentence) < 3 || SKIP.test(sentence) || isProjectMention(sentence, projectTerms)) continue;
     const sentenceLower = sentence.toLowerCase();
     const sentenceStrong = strongCue(sentenceLower);
     if (sentenceStrong) current = sentenceStrong;
@@ -219,7 +253,11 @@ export function summarise(transcript, { tags = [], glossary = [], projectTerms =
       if (section) current = section;
       else section = (!singleTag && weakCue(lower)) || current;
 
-      const bullet = cleanBullet(clause);
+      // Resolve "it" to the work item named earlier: "present it" -> "present the briefing note".
+      const resolved = lastObject ? clause.replace(new RegExp(`\\b(${ACTION_VERBS}|present|discuss|send|share)( it)\\b`, 'i'), `$1 ${lastObject}`) : clause;
+      const obj = clause.match(OBJECT_RE);
+      if (obj) lastObject = `the ${obj[2]}`;
+      const bullet = cleanBullet(resolved);
       if (!bullet || wordCount(bullet) < 2 || SKIP.test(bullet)) continue;
       for (const b of splitCompound(bullet)) if (b && wordCount(b) >= 2) result[section].push(b);
     }

@@ -87,15 +87,6 @@
           <div class="chips" id="rec-tags"></div>
         </div>
       </div>
-      <details class="card prompt-card" id="rec-prompts">
-        <summary>What to say</summary>
-        <ol class="prompts">
-          <li><strong>"This week I achieved..."</strong> completed tasks and progress</li>
-          <li><strong>"The challenges were..."</strong> obstacles, delays, risks</li>
-          <li><strong>"Next week I will..."</strong> your top priorities</li>
-          <li><strong>"I need support with..."</strong> or "No support needed"</li>
-        </ol>
-      </details>
       <div class="recorder card">
         <canvas id="rec-wave" height="80" aria-hidden="true"></canvas>
         <div class="timer" id="rec-timer" aria-live="polite">0:00</div>
@@ -112,31 +103,45 @@
           </button>
         </div>
       </div>
+      <details class="card prompt-card" id="rec-prompts" open>
+        <summary>Cover these four points</summary>
+        <ol class="prompts">
+          <li><strong>"This week I achieved..."</strong> completed tasks and progress</li>
+          <li><strong>"The challenges were..."</strong> obstacles, delays, risks</li>
+          <li><strong>"Next week I will..."</strong> your top priorities</li>
+          <li><strong>"I need support with..."</strong> or "No support needed"</li>
+        </ol>
+      </details>
     </section>
 
     <!-- Note detail -->
     <section class="view" id="view-note" hidden>
-      <div class="card">
+      <div class="card note-head">
         <div class="row between">
-          <div>
-            <div class="eyebrow" id="note-project"></div>
-            <div class="muted" id="note-date"></div>
-          </div>
+          <div class="eyebrow" id="note-project"></div>
           <span class="pill" id="note-status"></span>
         </div>
-        <audio id="note-audio" controls preload="none"></audio>
+        <h2 class="note-title" id="note-title"></h2>
+        <div class="muted" id="note-date"></div>
+        <div class="editor-line" id="note-editor"></div>
       </div>
-      <div id="note-sections"></div>
-      <div class="fine" id="note-editor"></div>
+      <div class="card note-body" id="note-sections"></div>
+      <div class="card coach" id="note-coach" hidden>
+        <h3>Suggestions to strengthen this note</h3>
+        <ul class="tips" id="note-tips"></ul>
+      </div>
       <details class="card">
-        <summary>Transcript</summary>
+        <summary>Recording and transcript</summary>
+        <audio id="note-audio" controls preload="none"></audio>
         <p id="note-transcript" class="transcript"></p>
       </details>
       <div class="stack">
-        <button class="btn secondary block" id="note-ai" hidden>Edit with AI editor</button>
         <button class="btn primary block" id="note-followup">Add to this note (voice)</button>
-        <button class="btn secondary block" id="note-rerecord">Re-record</button>
-        <button class="btn danger block" id="note-delete">Delete note</button>
+        <button class="btn secondary block" id="note-ai" hidden>Improve wording with AI editor</button>
+        <div class="row gap">
+          <button class="btn secondary grow" id="note-rerecord">Re-record</button>
+          <button class="btn danger grow" id="note-delete">Delete</button>
+        </div>
       </div>
     </section>
 
