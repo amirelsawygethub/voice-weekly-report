@@ -9,7 +9,7 @@ import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.4.0';
 // Bump when the on-device editing rules change, so older notes are re-edited.
 const RULES_VERSION = 5;
 const AUDIO_RETENTION_DAYS = 90;
@@ -29,7 +29,7 @@ const state = {
   processAgain: false,
   model: { pct: 0, active: false, ready: false, error: '' },
   installPrompt: null,
-  ai: { enabled: false, mode: 'proxy', proxyUrl: '', accessCode: '', apiKey: '' }
+  ai: { enabled: false, mode: 'gemini', geminiKey: '', proxyUrl: '', accessCode: '', apiKey: '' }
 };
 
 const DEFAULT_SETTINGS = {
@@ -249,6 +249,9 @@ const RENDER = {
         </button>`).join('')
       : '<div class="empty">No notes recorded yet this week.<br>Tap Record to add your first note.</div>';
 
+    const ab = $('#ai-banner');
+    ab.hidden = ai.isConfigured(state.ai) || !!state.settings.aiPromptDismissed;
+    ab.innerHTML = '<span>Get sharper wording: connect Google Gemini with your Google account (about 1 minute, free).</span><span class="row gap"><button class="btn primary" id="ai-banner-go">Connect</button><button class="btn ghost" id="ai-banner-x" aria-label="Dismiss">Later</button></span>';
     const rb = $('#reminder-banner');
     rb.hidden = !isReminderDue(state.settings.reminderTime, notes.length);
     rb.innerHTML = 'Your weekly report is due today. Please record your notes. <button class="btn primary" data-go="record">Record</button>';
@@ -296,8 +299,8 @@ const RENDER = {
 
     const aiOn = ai.isConfigured(state.ai);
     $('#note-editor').innerHTML = !done ? '' : note.editor === 'ai'
-      ? '<span class="badge ai">AI edited</span><span>Wording refined by the AI business-writing editor.</span>'
-      : `<span class="badge">On-device edit</span>${note.aiError ? `<span>${esc(note.aiError)}</span>` : ''}${aiOn ? '' : '<button class="link-btn" data-go="settings">Turn on the AI editor for sharper wording</button>'}`;
+      ? '<span class="badge ai">AI edited</span><span>Wording refined by the AI writing assistant.</span>'
+      : `<span class="badge">On-device edit</span>${note.aiError ? `<span>${esc(note.aiError)}</span>` : ''}${aiOn ? '' : '<button class="link-btn" id="ai-banner-go">Connect Google Gemini for sharper wording</button>'}`;
     $('#note-ai').hidden = !(done && note.editor !== 'ai' && aiOn);
 
     const tips = done ? coach(note, state.projects) : [];
@@ -715,6 +718,18 @@ function wire() {
       state.installPrompt = null;
       renderInstallBanner();
     }
+    if (e.target.id === 'ai-banner-go') {
+      state.ai.enabled = true;
+      state.ai.mode = 'gemini';
+      await saveAi();
+      await show('settings');
+      $('#ai-card').scrollIntoView({ block: 'start' });
+    }
+    if (e.target.id === 'ai-banner-x') {
+      state.settings.aiPromptDismissed = true;
+      saveSettings();
+      $('#ai-banner').hidden = true;
+    }
     if (e.target.id === 'dismiss-install') {
       state.settings.installDismissed = true;
       saveSettings();
@@ -830,6 +845,7 @@ function wire() {
     state.ai = {
       enabled: $('#ai-enabled').checked,
       mode: $('#ai-mode').value,
+      geminiKey: $('#ai-gemini').value.trim(),
       proxyUrl: $('#ai-proxy').value.trim(),
       accessCode: $('#ai-code').value.trim(),
       apiKey: $('#ai-key').value.trim()
@@ -837,8 +853,8 @@ function wire() {
     saveAi();
     renderAiSettings();
   };
-  ['#ai-enabled', '#ai-mode', '#ai-proxy', '#ai-code', '#ai-key'].forEach(sel => { $(sel).onchange = readAi; });
-  $('#ai-test').onclick = async () => {
+  ['#ai-enabled', '#ai-mode', '#ai-gemini', '#ai-proxy', '#ai-code', '#ai-key'].forEach(sel => { $(sel).onchange = readAi; });
+  const testAi = async () => {
     readAi();
     if (!ai.isConfigured(state.ai)) { $('#ai-status').textContent = 'Turn the editor on and complete the connection details first.'; return; }
     $('#ai-test').disabled = true;
@@ -851,6 +867,23 @@ function wire() {
       $('#ai-status').textContent = ai.friendlyError(err);
     }
     $('#ai-test').disabled = false;
+  };
+  $('#ai-test').onclick = testAi;
+  // One-tap paste of the key copied from Google AI Studio, then connect.
+  $('#gemini-paste').onclick = async () => {
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (text) $('#ai-gemini').value = text;
+    } catch { /* clipboard blocked: the user can paste into the field */ }
+    if (!$('#ai-gemini').value.trim()) {
+      $('#ai-gemini').focus();
+      $('#ai-status').textContent = 'Paste your key into the field below, then tap Test connection.';
+      return;
+    }
+    $('#ai-enabled').checked = true;
+    state.settings.aiPromptDismissed = true;
+    saveSettings();
+    await testAi();
   };
   $('#note-ai').onclick = async () => {
     const note = state.notes.find(n => n.id === state.viewOpts.id);
@@ -980,12 +1013,16 @@ async function shareReport() {
 function renderAiSettings() {
   const c = state.ai;
   $('#ai-enabled').checked = !!c.enabled;
-  $('#ai-mode').value = c.mode || 'proxy';
+  $('#ai-mode').value = c.mode || 'gemini';
+  $('#ai-gemini').value = c.geminiKey || '';
   $('#ai-proxy').value = c.proxyUrl || '';
   $('#ai-code').value = c.accessCode || '';
   $('#ai-key').value = c.apiKey || '';
   $('#ai-fields').hidden = !c.enabled;
-  document.querySelectorAll('[data-ai]').forEach(el => { el.hidden = el.dataset.ai !== (c.mode || 'proxy'); });
+  document.querySelectorAll('[data-ai]').forEach(el => { el.hidden = el.dataset.ai !== (c.mode || 'gemini'); });
+  $('#ai-privacy').textContent = (c.mode || 'gemini') === 'gemini'
+    ? 'Privacy: only transcript text is sent to Google; audio never leaves this device. On the free Gemini tier, Google may use submitted text to improve its products and human reviewers may read it, so avoid confidential details or use a paid (billing-enabled) key. Your key is stored encrypted on this device.'
+    : 'Privacy: only transcript text is sent to Anthropic; audio never leaves this device. Connection details are stored encrypted on this device.';
 }
 
 function reportSignature(notes) {

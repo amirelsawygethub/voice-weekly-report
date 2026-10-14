@@ -190,6 +190,8 @@ ul.plain li { margin-bottom: .35rem; }
 .note-body ul { margin: 0; padding-left: 1.2rem; }
 .note-body li { margin-bottom: 4px; }
 .note-body .missing p { margin: 0; color: var(--muted); font-size: .9rem; }
+.steps { list-style: none; padding: 0; margin: 4px 0 12px; display: flex; flex-direction: column; gap: 10px; }
+.steps li { display: flex; flex-direction: column; gap: 6px; }
 .link-btn { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--navy); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .coach { border-left: 4px solid var(--gold); }
 .coach h3 { font-size: .95rem; }

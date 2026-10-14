@@ -50,19 +50,22 @@ Microphone ─► Encrypted audio (on device) ─► Whisper speech-to-text (on 
 | Reminder | A repeating calendar event every Thursday (default 17:00) with a follow-up alarm three hours later, added to the phone's own calendar (`.ics` or Google Calendar) |
 | Offline | Service worker caches the app; the browser caches the speech model |
 
-## AI business-writing editor (optional)
+## AI writing assistant (optional)
 
-Turn it on in **Settings > AI business-writing editor**. If it is off, offline or unavailable, the on-device edit is used automatically, so a report is always produced.
+Turn it on in **Settings > AI writing assistant**, or tap **Connect** on the Home banner. If it is off, offline or unavailable, the on-device edit is used automatically, so a report is always produced.
 
-- **New notes** are edited automatically after transcription. Existing notes show an **Edit with AI editor** button.
-- **Weekly report**: **Polish final wording with AI** consolidates the week (merges duplicates, applies later corrections, at most 5 bullets per section). If notes change afterwards, the app asks you to polish again.
-- **Safeguards**: project names, codes and key terms are re-applied after editing, and dashes are removed. The editor is instructed not to add facts.
+### Google Gemini (default, free with a Google account)
 
-### Connection options
+1. Tap **Get your free Gemini key**. Google AI Studio opens; sign in with your Google account and tap **Create API key**, then copy it.
+2. Back in the app, tap **Paste key and connect**.
+
+The app uses the newest stable Gemini Flash model and falls back to older Flash models if needed. Privacy: on the **free** Gemini tier, Google may use submitted text to improve its products and human reviewers may read it. For confidential work, enable billing on the key's Google Cloud project (paid tier), where Google does not use prompts or responses to improve its products.
+
+### Claude options
 
 | Option | When to use | Setup |
 |---|---|---|
-| **Team proxy (recommended)** | Rolling out to colleagues | Deploy `proxy/cloudflare-worker.js` once. Colleagues enter only the proxy URL and a team access code. The API key never reaches a phone. |
+| **Team proxy** | Organisation-wide rollout with one central key | Deploy `proxy/cloudflare-worker.js` once. Colleagues enter only the proxy URL and a team access code. The API key never reaches a phone. |
 | **Personal API key** | Individual use or testing | Paste an Anthropic API key in Settings. It is stored encrypted on the device. |
 
 **Deploying the team proxy (Cloudflare Workers, free tier):**

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://api.anthropic.com https://*.workers.dev https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://*.workers.dev https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#1F3A5F">
   <meta name="description" content="Record voice notes and receive an automatically generated weekly report.">
@@ -48,6 +48,7 @@
     <!-- Home -->
     <section class="view" id="view-home" hidden>
       <div id="install-banner" class="banner info" hidden></div>
+      <div id="ai-banner" class="banner info" hidden></div>
       <div id="reminder-banner" class="banner warn" hidden></div>
       <div class="card week-card">
         <div class="row between">
@@ -122,7 +123,7 @@
       </details>
       <div class="stack">
         <button class="btn primary block" id="note-followup">Add to this note (voice)</button>
-        <button class="btn secondary block" id="note-ai" hidden>Improve wording with AI editor</button>
+        <button class="btn secondary block" id="note-ai" hidden>Improve wording with AI</button>
         <div class="row gap">
           <button class="btn secondary grow" id="note-rerecord">Re-record</button>
           <button class="btn danger grow" id="note-delete">Delete</button>
@@ -198,28 +199,37 @@
         <button class="btn secondary block" id="set-model-load">Download model now</button>
       </div>
       <div class="card">
-        <h3>AI business-writing editor</h3>
-        <p class="muted">Optional. After transcription, Claude edits each note into business-formal bullets. It keeps your main ideas and facts, removes filler and repetition, and rewrites incoherent passages clearly. The standard on-device edit always runs and is used whenever the AI editor is off or unavailable.</p>
-        <label class="toggle"><input type="checkbox" id="ai-enabled"> Use the AI editor</label>
+        <h3 id="ai-card">AI writing assistant</h3>
+        <p class="muted">Optional. After transcription, AI turns each note into sharper business-formal bullets: it keeps your facts, removes filler and rewrites unclear sentences. The on-device edit is always used when the assistant is off or unavailable.</p>
+        <label class="toggle"><input type="checkbox" id="ai-enabled"> Use the AI writing assistant</label>
         <div id="ai-fields" hidden>
-          <label class="field">Connection
+          <label class="field">Service
             <select id="ai-mode">
-              <option value="proxy">Team proxy (recommended)</option>
-              <option value="key">Personal Anthropic API key</option>
+              <option value="gemini">Google Gemini (free with your Google account)</option>
+              <option value="proxy">Team proxy (set up by your organisation)</option>
+              <option value="key">Anthropic Claude (personal API key)</option>
             </select>
           </label>
-          <label class="field" data-ai="proxy">Team proxy URL <input id="ai-proxy" type="url" inputmode="url" autocomplete="off" placeholder="https://weekly-report-editor.yourteam.workers.dev"></label>
-          <label class="field" data-ai="proxy">Team access code <input id="ai-code" type="password" autocomplete="off"></label>
+          <div data-ai="gemini">
+            <ol class="steps">
+              <li><a class="btn secondary block" id="gemini-get" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">1. Get your free Gemini key</a>
+                <span class="fine">Sign in with your Google account, tap <strong>Create API key</strong>, then copy it.</span></li>
+              <li><button type="button" class="btn primary block" id="gemini-paste">2. Paste key and connect</button></li>
+            </ol>
+            <label class="field">Gemini API key <input id="ai-gemini" type="password" autocomplete="off" placeholder="Paste your key here" spellcheck="false"></label>
+          </div>
+          <label class="field" data-ai="proxy" hidden>Team proxy URL <input id="ai-proxy" type="url" inputmode="url" autocomplete="off" placeholder="https://weekly-report-editor.yourteam.workers.dev"></label>
+          <label class="field" data-ai="proxy" hidden>Team access code <input id="ai-code" type="password" autocomplete="off"></label>
           <label class="field" data-ai="key" hidden>Anthropic API key <input id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
           <button class="btn secondary block" id="ai-test">Test connection</button>
           <div class="fine" id="ai-status"></div>
         </div>
-        <p class="fine">Privacy: only transcript text is sent to Anthropic for editing. Audio never leaves this device. Connection details are stored encrypted on this device.</p>
+        <p class="fine" id="ai-privacy"></p>
       </div>
       <div class="card">
         <h3>Privacy and security</h3>
         <ul class="plain">
-          <li>Audio never leaves this device. Transcripts stay on the device unless you turn on the AI editor.</li>
+          <li>Audio never leaves this device. Transcripts stay on the device unless you turn on the AI writing assistant.</li>
           <li>All notes are encrypted with AES-256-GCM. The key cannot be exported.</li>
           <li>Audio is deleted automatically after 90 days. Reports are kept.</li>
         </ul>

@@ -1,5 +1,7 @@
-// Optional AI business-writing editor using Claude (Anthropic SDK).
-// Only transcript text is sent; audio never leaves the device. The editor
+// Optional AI business-writing editor. Works with Google Gemini (a free key
+// created with the user's Google account) or Claude (Anthropic SDK, through a
+// team proxy or a personal key). Only transcript text is sent; audio never
+// leaves the device. The editor
 // keeps the speaker's meaning, removes noise, makes incoherent passages
 // coherent and condenses everything into report bullets.
 import { applyGlossary, stripDashes } from './summarize.js';
@@ -30,7 +32,55 @@ async function getClient(cfg) {
 
 export function isConfigured(cfg) {
   if (!cfg || !cfg.enabled) return false;
+  if (cfg.mode === 'gemini') return !!cfg.geminiKey;
   return cfg.mode === 'proxy' ? !!cfg.proxyUrl : !!cfg.apiKey;
+}
+
+// ---- Google Gemini ----
+// Newest stable Flash model first; older ones are tried if a model is not
+// available to the user's key.
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+export const GEMINI_KEY_PAGE = 'https://aistudio.google.com/apikey';
+
+class GeminiError extends Error {
+  constructor(status, message) { super(message); this.status = status; this.provider = 'gemini'; }
+}
+
+async function callGemini(cfg, system, userContent, schema) {
+  let lastError = new GeminiError(404, 'No Gemini model is available for this key.');
+  for (const model of GEMINI_MODELS) {
+    // Try native JSON-schema output first; fall back to schema-in-prompt.
+    for (const native of [true, false]) {
+      const body = {
+        systemInstruction: { parts: [{ text: native ? system : `${system}\n\nRespond only with JSON that matches this JSON Schema:\n${JSON.stringify(schema)}` }] },
+        contents: [{ role: 'user', parts: [{ text: userContent }] }],
+        generationConfig: { responseMimeType: 'application/json', ...(native ? { responseJsonSchema: schema } : {}) }
+      };
+      const res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.geminiKey },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const cand = data.candidates && data.candidates[0];
+        if (!cand) throw new GeminiError(400, 'Gemini declined this text. The standard on-device edit is used instead.');
+        if (cand.finishReason && !['STOP', 'FINISH_REASON_UNSPECIFIED'].includes(cand.finishReason)) {
+          throw new GeminiError(400, `Gemini stopped early (${cand.finishReason}). The standard on-device edit is used instead.`);
+        }
+        const text = (cand.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
+        return JSON.parse(text);
+      }
+      const err = await res.json().catch(() => ({}));
+      const message = err.error?.message || `HTTP ${res.status}`;
+      lastError = new GeminiError(res.status, message);
+      if (res.status === 404) break;
+      if (res.status === 400 && native && /schema|responseJsonSchema|response_json_schema/i.test(message)) continue;
+      throw lastError;
+    }
+  }
+  throw lastError;
 }
 
 const STYLE_RULES = `Style rules for every bullet:
@@ -125,6 +175,7 @@ const WEEK_SCHEMA = {
 };
 
 async function callClaude(cfg, system, userContent, schema, effort = 'medium') {
+  if (cfg.mode === 'gemini') return callGemini(cfg, system, userContent, schema);
   const client = await getClient(cfg);
   const response = await client.beta.messages.create({
     model: AI_MODEL,
@@ -150,6 +201,14 @@ function cleanList(items, terms) {
 
 // Maps SDK error classes to plain-language messages for colleagues.
 export function friendlyError(err) {
+  if (err && err.provider === 'gemini') {
+    if (err.status === 400 && /api key|API_KEY/i.test(err.message)) return 'Google did not accept this Gemini key. Create a new key and paste it again in Settings.';
+    if (err.status === 401 || err.status === 403) return 'Google did not accept this Gemini key. Check it in Settings.';
+    if (err.status === 429) return 'Gemini free-tier limit reached for now. The standard on-device edit is used; try again later.';
+    if (err.status >= 500) return 'Gemini is temporarily unavailable. The standard on-device edit is used.';
+    return err.message;
+  }
+  if (err instanceof TypeError) return 'No connection to the AI editor. The standard on-device edit is used.';
   const A = sdk;
   if (A) {
     if (err instanceof A.AuthenticationError || err instanceof A.PermissionDeniedError) return 'The AI editor rejected the credentials. Check the team access code or API key in Settings.';
