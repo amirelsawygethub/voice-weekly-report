@@ -75,8 +75,9 @@ function detectProject(sentence, known) {
     if (m) {
       const name = cleanName(m[1]);
       if (name) {
-        const k = matchKnown(name, known);
-        return { name: k ? k.name : name, alias: m[1].trim() };
+        // Keep the name as written; the app maps it to a known project and
+        // lets a user-corrected spelling replace a misheard one.
+        return { name, alias: m[1].trim() };
       }
     }
   }

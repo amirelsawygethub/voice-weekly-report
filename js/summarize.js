@@ -16,14 +16,14 @@ const TAG_TO_KEY = Object.fromEntries(SECTIONS.map(s => [s.tag, s.key]));
 const STRONG = [
   ['support', /\b(i|we) (would )?(need|require|request|am requesting|are requesting)\b.*\b(support|help|assistance|approval|input|guidance)\b|\b(support|help|assistance) (needed|required|requested)\b|\bsupport (with|from|on)\b|\bno (support|help|assistance)\b|\b(don't|do not) need (any )?(support|help|assistance)\b/],
   ['priorities', /\bnext week\b|\bpriorit(y|ies)\b|\bcoming week\b|\bgoing forward\b/],
-  ['challenges', /\b(challenges?|obstacles?|blockers?|problems?|issues?|difficult(y|ies)|risks?|concerns?)\b( (i|we) (faced|had|encountered|ran into))? (was|were|is|are|include[sd]?)\b|^(the |one |another |my |our )?(main |key |biggest |major )?(challenges?|obstacles?|blockers?|problems?|issues?|difficult(y|ies)|risks?)\b|\bno (challenges|issues|problems|blockers)\b/],
+  ['challenges', /\b(challenges?|obstacles?|blockers?|problems?|issues?|difficult(y|ies)|risks?|concerns?|dependenc(y|ies))\b( (i|we) (faced|had|encountered|ran into))? (was|were|is|are|include[sd]?)\b|^(the |one |another |my |our )?(main |key |biggest |major )?(challenges?|obstacles?|blockers?|problems?|issues?|difficult(y|ies)|risks?)\b|\bno (challenges|issues|problems|blockers)\b/],
   ['achievements', /\bthis week,? (i|we)\b|\b(achievements?|accomplishments?|highlights?)\b|\bprogress (this week|so far)\b/]
 ];
 
 // Weak cues classify a single sentence without changing the running section.
 const WEAK = {
   achievements: /\b(completed?|finished|delivered|launched|finali[sz]ed|submitted|achieved|accomplished|managed to|successfully|signed|approved|held|conducted|trained|onboarded|published|closed|resolved)\b/,
-  challenges: /\b(delay(ed|s)?|blocked|wait(ing)? (on|for)|pending|postponed|cancel+ed|rescheduled|on hold|stalled|struggl\w*|unable to|could ?n[o']t|failed|shortage|unstable|lack of|behind schedule|overdue|bottleneck|pending approval|risk)\b/,
+  challenges: /\b(delay(ed|s)?|blocked|depend(s|ent|ing)? on|dependenc(y|ies)|wait(ing)? (on|for)|pending|postponed|cancel+ed|rescheduled|on hold|stalled|struggl\w*|unable to|could ?n[o']t|failed|shortage|unstable|lack of|behind schedule|overdue|bottleneck|pending approval|risk)\b/,
   priorities: /\b(i|we) (will|'ll|plan to|intend to|am going to|are going to|aim to)\b|\b(i'll|we'll)\b|\bupcoming\b|\bby (monday|tuesday|wednesday|thursday|friday|sunday|saturday|the end of)\b/,
   support: /\b(need|require) (help|support|approval|assistance|guidance)\b|\bhelp from\b/
 };
@@ -134,7 +134,7 @@ const LEADS = [
   /^(the )?project [^,.]{2,50},\s*/i,
   /^(this week|last week|today|yesterday|for this week|for next week|next week|during the week|over the week|this past week|so far|in the coming week|going forward)\b,?\s*/i,
   /^(my |our |the )?(main |key |biggest |major |primary |top )?(achievements?|accomplishments?|progress|highlights?|updates?)( for| this| this week)*( (was|were|is|are|include[sd]?|that))?:?\s*/i,
-  /^(the |my |our |one |another )?(main |key |biggest |major |primary |other )?(challenges?|issues?|problems?|obstacles?|blockers?|difficult(y|ies)|risks?|concerns?)( this week| (that )?(i|we) (faced|had|encountered|ran into))?( (was|were|is|are|include[sd]?|remains?))?:?\s*(that\s+)?/i,
+  /^(the |my |our |one |another )?(main |key |biggest |major |primary |other )?(challenges?|issues?|problems?|obstacles?|blockers?|difficult(y|ies)|risks?|concerns?|dependenc(y|ies))( this week| (that )?(i|we) (faced|had|encountered|ran into))?( (was|were|is|are|include[sd]?|remains?))?:?\s*(that\s+)?/i,
   /^(my |our |the )?(main |key |top )?priorit(y|ies)( for next week| next week)?( (is|are|will be|include))?:?\s*(to\s+)?/i,
   /^(the )?support (needed|required|requested)( is| would be)?:?\s*/i,
   /^(i|we) (would )?(also )?(need|require|request|am requesting|are requesting)( some| additional| further)? (support|help|assistance|guidance)( from [^,]+?)?( (with|on|for|in|regarding|to))?\s+/i,
@@ -157,6 +157,8 @@ const PRONOUN_LEADS = [
 
 function cleanBullet(raw) {
   let s = raw.trim().replace(/^[,;:\s]+/, '');
+  // Keep who the support is from: "I need support from finance to release..." -> "Support from finance to release..."
+  s = s.replace(/^(?:i|we) (?:would )?(?:also )?(?:need|require|request)(?: some| additional| further)? (?:support|help|assistance|guidance) (from [^,]+? (?:to|with|on|for)\s)/i, 'Support $1');
   for (let i = 0; i < 4; i++) {
     const before = s;
     for (const re of LEADS) s = s.replace(re, '');

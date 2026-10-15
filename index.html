@@ -64,6 +64,10 @@
         <span class="mic-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" class="fill"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></span>
         <span><strong>Record a note</strong><small>Two minutes is enough</small></span>
       </button>
+      <button class="btn secondary block" id="home-type">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h1M11 10h1M15 10h1M7 14h10"/></svg>
+        Prefer typing? Type a note
+      </button>
       <h3 class="section-title">Notes this week</h3>
       <div id="home-notes" class="list"></div>
       <button class="btn secondary block" id="home-report">View weekly report</button>
@@ -87,6 +91,7 @@
           </button>
         </div>
       </div>
+      <button class="btn ghost block" id="rec-type">Prefer typing? Type this note instead</button>
       <details class="card prompt-card" id="rec-prompts" open>
         <summary>Tips for a strong note</summary>
         <ol class="prompts">
@@ -95,9 +100,37 @@
           <li><strong>Any challenges</strong> or delays</li>
           <li><strong>Your priorities</strong> for next week</li>
           <li><strong>Support you need</strong>, if any</li>
+          <li><strong>Dependencies</strong>, if any: what your work is waiting on, and who is waiting on you</li>
         </ol>
         <p class="fine">Covering several projects? Just say "Moving to..." before the next one.</p>
       </details>
+    </section>
+
+    <!-- Type a note / correct a transcript -->
+    <section class="view" id="view-type" hidden>
+      <div class="card">
+        <p class="muted" id="type-intro"></p>
+        <audio id="type-audio" controls preload="none" hidden></audio>
+        <label class="field" for="type-text"><span id="type-label">Your note</span></label>
+        <textarea id="type-text" rows="12" spellcheck="true" autocapitalize="sentences"
+          placeholder="On the Edu Nexus project, this week we... The main challenge was... Next week I will... I need support with... We are waiting on..."></textarea>
+        <div class="row between fine"><span id="type-count">0 words</span><span>Projects and sections are detected automatically.</span></div>
+      </div>
+      <details class="card prompt-card">
+        <summary>What to include</summary>
+        <ol class="prompts">
+          <li><strong>The project name</strong>, for example "On the Edu Nexus project..."</li>
+          <li><strong>What you achieved</strong> this week</li>
+          <li><strong>Any challenges</strong> or delays</li>
+          <li><strong>Your priorities</strong> for next week</li>
+          <li><strong>Support you need</strong>, if any</li>
+          <li><strong>Dependencies</strong>, if any: what your work is waiting on, and who is waiting on you</li>
+        </ol>
+      </details>
+      <div class="stack">
+        <button class="btn primary block" id="type-save">Save note</button>
+        <button class="btn ghost block" id="type-cancel">Cancel</button>
+      </div>
     </section>
 
     <!-- Note detail -->
@@ -111,6 +144,15 @@
         <div class="muted" id="note-date"></div>
         <div class="editor-line" id="note-editor"></div>
       </div>
+      <div class="card review-card" id="note-review" hidden>
+        <h3>Check the transcript</h3>
+        <p class="muted">Speech recognition can mishear names and numbers. This note is added to your report once you confirm it.</p>
+        <p class="transcript" id="note-review-text"></p>
+        <div class="row gap">
+          <button class="btn primary grow" id="note-confirm">Looks good, add to report</button>
+          <button class="btn secondary grow" id="note-correct">Correct transcript</button>
+        </div>
+      </div>
       <div class="card note-body" id="note-sections"></div>
       <div class="card coach" id="note-coach" hidden>
         <h3>Suggestions to strengthen this note</h3>
@@ -120,9 +162,13 @@
         <summary>Recording and transcript</summary>
         <audio id="note-audio" controls preload="none"></audio>
         <p id="note-transcript" class="transcript"></p>
+        <button class="btn secondary block" id="note-correct-2">Correct transcript</button>
       </details>
       <div class="stack">
-        <button class="btn primary block" id="note-followup">Add to this note (voice)</button>
+        <div class="row gap">
+          <button class="btn primary grow" id="note-followup">Add by voice</button>
+          <button class="btn secondary grow" id="note-addtype">Add by typing</button>
+        </div>
         <button class="btn secondary block" id="note-ai" hidden>Improve wording with AI</button>
         <div class="row gap">
           <button class="btn secondary grow" id="note-rerecord">Re-record</button>
@@ -256,6 +302,7 @@
           <li><strong>"The challenges were..."</strong> Obstacles, delays or risks.</li>
           <li><strong>"Next week I will..."</strong> Your top priorities.</li>
           <li><strong>"I need support with..."</strong> What help you need and from whom. Skip it if you need none.</li>
+          <li><strong>"We are waiting on..." / "...depends on..."</strong> Dependencies, if any: inputs, approvals or deliverables your work is waiting on, and anyone waiting on you. These appear under Challenges, or under Support when you ask for help to unblock them.</li>
         </ol>
       </div>
       <div class="card">
@@ -264,6 +311,8 @@
           <li>Speak in complete sentences at a normal pace.</li>
           <li>Say project names, client names and acronyms clearly and in full.</li>
           <li>Include numbers and dates, for example "12 schools" or "by 20 October".</li>
+          <li>Check the transcript after recording. Tap <strong>Correct transcript</strong> to fix misheard names or numbers before the note is added to your report.</li>
+          <li>Somewhere you can't speak? Tap <strong>Type a note</strong> instead. Typed notes are analysed the same way.</li>
           <li>Keep each note under 3 minutes. Several short notes give better results than one long note.</li>
           <li>To correct a report, record a follow-up note such as "Correction for priorities: the steering committee meeting moved to Tuesday."</li>
         </ul>

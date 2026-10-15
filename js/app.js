@@ -9,9 +9,9 @@ import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 // Bump when the on-device editing rules change, so older notes are re-edited.
-const RULES_VERSION = 5;
+const RULES_VERSION = 7;
 const AUDIO_RETENTION_DAYS = 90;
 const APP_URL = new URL('./', location.href).href;
 
@@ -162,6 +162,8 @@ function statusPill(note) {
     review: ['Please re-record', 'err'],
     error: ['Error', 'err']
   };
+  if (note.status === 'done' && note.needsReview) return '<span class="pill warn">Needs review</span>';
+  if (note.status === 'processing' && !note.audioIds?.length) return '<span class="pill busy">Analysing</span>';
   const [label, cls] = map[note.status] || ['', ''];
   return `<span class="pill ${cls}">${label}</span>`;
 }
@@ -187,7 +189,7 @@ function download(filename, text, type) {
 
 const TITLES = {
   onboarding: 'Welcome', home: 'Weekly Report', record: 'Record Note', note: 'Note',
-  report: 'Weekly Report', settings: 'Settings', guide: 'Voice Note Guidelines'
+  report: 'Weekly Report', settings: 'Settings', guide: 'Note Guidelines', type: 'Type a Note'
 };
 const TAB_VIEWS = ['home', 'report', 'guide', 'settings'];
 
@@ -201,8 +203,9 @@ async function show(view, opts = {}, { push = true, replace = false } = {}) {
   state.viewOpts = opts;
   document.querySelectorAll('.view').forEach(v => { v.hidden = v.id !== `view-${view}`; });
   $('#title').textContent = TITLES[view];
-  $('#btn-back').hidden = !['record', 'note'].includes(view);
-  $('#tabbar').hidden = ['onboarding', 'record'].includes(view);
+  $('#btn-back').hidden = !['record', 'note', 'type'].includes(view);
+  $('#tabbar').hidden = ['onboarding', 'record', 'type'].includes(view);
+  if (view === 'type') $('#title').textContent = opts.mode === 'correct' ? 'Correct Transcript' : opts.mode === 'append' ? 'Add to Note' : 'Type a Note';
   $('#btn-help').hidden = view === 'onboarding' || view === 'guide';
   document.querySelectorAll('.tab[data-tab]').forEach(t => t.classList.toggle('active', t.dataset.tab === view));
   if (replace) history.replaceState({ view, opts }, '');
@@ -275,7 +278,12 @@ const RENDER = {
     const done = note.status === 'done' && note.sections;
     $('#note-project').textContent = done ? noteProjects(note) : 'Detecting project';
     $('#note-title').textContent = done ? (note.title || 'Weekly update') : 'Processing note';
-    $('#note-date').textContent = `${formatDate(note.createdAt)} · ${Math.max(1, Math.round((note.duration || 0) / 60))} min`;
+    $('#note-date').textContent = note.audioIds?.length
+      ? `${formatDate(note.createdAt)} · ${Math.max(1, Math.round((note.duration || 0) / 60))} min recording`
+      : `${formatDate(note.createdAt)} · Typed note`;
+    $('#note-review').hidden = !(done && note.needsReview);
+    $('#note-review-text').textContent = note.transcript || '';
+    $('#note-correct-2').hidden = !done;
     $('#note-status').outerHTML = statusPill(note).replace('<span', '<span id="note-status"');
 
     const box = $('#note-sections');
@@ -329,7 +337,8 @@ const RENDER = {
     const notes = notesInWeek(wk);
     $('#rep-week').textContent = formatRange(wk.start, wk.lastWorkday);
     $('#rep-next').disabled = state.reportOffset >= 0;
-    const done = notes.filter(n => n.status === 'done');
+    const done = notes.filter(n => n.status === 'done' && !n.needsReview);
+    const awaiting = notes.filter(n => n.status === 'done' && n.needsReview);
     const pendingCount = notes.filter(n => ['queued', 'processing'].includes(n.status)).length;
     const issues = notes.filter(n => ['review', 'error'].includes(n.status)).length;
     const meta = await db.get('reports', weekKey(wk.start));
@@ -338,6 +347,7 @@ const RENDER = {
     if (meta?.submittedAt) status += `<div class="banner info">Submitted on ${esc(formatDate(meta.submittedAt))}.</div>`;
     if (pendingCount) status += `<div class="banner info">${pendingCount} note(s) are still being transcribed on your device. The report will update automatically.</div>`;
     if (issues) status += `<div class="banner warn">${issues} note(s) need attention. Open them from Home to re-record.</div>`;
+    if (awaiting.length) status += `<div class="banner warn"><span>${awaiting.length} note(s) are waiting for you to check the transcript. They are added to the report once confirmed.</span><button class="btn primary" data-note="${esc(awaiting[0].id)}">Review</button></div>`;
     $('#rep-status').innerHTML = status;
 
     const hasContent = done.length > 0;
@@ -388,8 +398,69 @@ const RENDER = {
     } catch { /* optional */ }
   },
 
-  guide() {}
+  guide() {},
+
+  async type(opts) {
+    const note = opts.noteId ? state.notes.find(n => n.id === opts.noteId) : null;
+    const area = $('#type-text');
+    const audio = $('#type-audio');
+    if (audio.dataset.url) URL.revokeObjectURL(audio.dataset.url);
+    audio.removeAttribute('src');
+    audio.hidden = true;
+    if (opts.mode === 'correct' && note) {
+      $('#type-intro').textContent = 'Fix any words the speech recognition got wrong, such as names, numbers or acronyms. Your report is rebuilt from the corrected text.';
+      $('#type-label').textContent = 'Transcript';
+      area.value = fullTranscript(note);
+      $('#type-save').textContent = 'Save corrections';
+      const last = note.audioIds?.[note.audioIds.length - 1];
+      const blob = last ? await loadAudio(last) : null;
+      if (blob && state.view === 'type') {
+        audio.src = URL.createObjectURL(blob);
+        audio.dataset.url = audio.src;
+        audio.hidden = false;
+      }
+    } else if (opts.mode === 'append' && note) {
+      $('#type-intro').textContent = `Type what you want to add to "${note.title || 'this note'}".`;
+      $('#type-label').textContent = 'Addition';
+      area.value = '';
+      $('#type-save').textContent = 'Add to note';
+    } else {
+      $('#type-intro').textContent = 'Type your update in plain sentences. There is no need to format it: the project, achievements, challenges, priorities, support and dependencies are picked up automatically.';
+      $('#type-label').textContent = 'Your note';
+      area.value = '';
+      $('#type-save').textContent = 'Save note';
+    }
+    area.oninput?.();
+    setTimeout(() => area.focus(), 50);
+  }
 };
+
+async function saveTyped() {
+  const opts = state.viewOpts;
+  const text = $('#type-text').value.replace(/[\u2014\u2013]/g, ', ').trim();
+  if (text.split(/\s+/).filter(Boolean).length < 4) { toast('Please write a little more (at least a short sentence).'); return; }
+  let note = opts.noteId ? state.notes.find(n => n.id === opts.noteId) : null;
+  if (opts.mode === 'correct' && note) {
+    note.transcriptEdit = { text, segments: (note.segments || []).length };
+    note.editor = 'standard';
+  } else if (opts.mode === 'append' && note) {
+    note.segments = [...(note.segments || []), { audioId: null, text, typed: true }];
+  } else {
+    note = {
+      id: db.uid(), projectId: null, tags: [], groups: [], createdAt: Date.now(), duration: 0,
+      audioIds: [], segments: [{ audioId: null, text, typed: true }], transcript: '', sections: null
+    };
+  }
+  // Typed or corrected text has been seen by the user, so no review step is needed.
+  note.needsReview = false;
+  note.status = 'queued';
+  note.error = '';
+  note.updatedAt = Date.now();
+  await saveNote(note);
+  toast(opts.mode === 'correct' ? 'Corrections saved. Rebuilding the note.' : 'Note saved.');
+  await show('note', { id: note.id }, { replace: true });
+  processQueue();
+}
 
 function renderProjects() {
   $('#set-projects').innerHTML = state.projects.map(p => `
@@ -512,6 +583,7 @@ async function finishRecording() {
     for (const id of note.audioIds || []) await db.del('audio', id);
     note.audioIds = [audioId];
     note.segments = [{ audioId, text: null }];
+    note.transcriptEdit = null;
     note.duration = result.duration;
     note.transcript = '';
     note.sections = null;
@@ -552,6 +624,7 @@ async function processNote(note) {
   try {
     for (const seg of note.segments || []) {
       if (seg.text !== null && seg.text !== undefined) continue;
+      note.needsReview = true;
       const blob = await loadAudio(seg.audioId);
       if (!blob) { seg.text = ''; continue; }
       const pcm = await blobToPCM(blob);
@@ -583,11 +656,22 @@ async function processNote(note) {
 
 // Automatic analysis: detects the project(s) spoken about and extracts the
 // four sections for each. Nobody selects a project or a tag.
+// The transcript as the user last saw it: their corrected text for the
+// segments it covers, plus any segments added after the correction.
+function fullTranscript(note) {
+  const segs = note.segments || [];
+  const edit = note.transcriptEdit;
+  const rest = segs.slice(edit ? edit.segments : 0).map(s => s.text || '').filter(Boolean);
+  return [edit ? edit.text : '', ...rest].filter(Boolean).join(edit ? '\n\n' : ' ').trim();
+}
+
 async function resummarise(note) {
-  note.transcript = (note.segments || []).map(s => s.text || '').join(' ').trim();
+  note.transcript = fullTranscript(note);
   const fallback = projectById(note.projectId)?.name || (state.projects.length === 1 ? state.projects[0].name : GENERAL);
   const result = note.transcript ? analyse(note.transcript, state.projects, fallback) : { title: '', groups: [] };
-  await setGroups(note, result.groups);
+  // Text the user typed or corrected is trusted for project spelling.
+  const trusted = !!note.transcriptEdit || (note.segments || []).every(s => s.typed);
+  await setGroups(note, result.groups, trusted);
   note.title = result.title;
   note.editor = 'standard';
   note.aiTips = [];
@@ -595,19 +679,27 @@ async function resummarise(note) {
 }
 
 // Finds a project by spoken name, or learns it as a new project.
-async function resolveProject(name) {
+async function resolveProject(name, trusted = false) {
   const known = matchKnown(name, state.projects);
-  if (known) return known;
+  if (known) {
+    // A user-corrected spelling replaces an auto-detected (possibly misheard) name.
+    if (trusted && known.auto && normName(known.name) !== normName(name) && name !== GENERAL) {
+      known.aliases = [...new Set([...(known.aliases || []), known.name])];
+      known.name = name;
+      await db.put('projects', known);
+    }
+    return known;
+  }
   const project = { id: db.uid(), name, code: '', glossary: [], createdAt: Date.now(), auto: true };
   await db.put('projects', project);
   state.projects.push(project);
   return project;
 }
 
-async function setGroups(note, groups) {
+async function setGroups(note, groups, trusted = false) {
   note.groups = [];
   for (const g of groups) {
-    const project = await resolveProject(g.name);
+    const project = await resolveProject(g.name, trusted);
     const existing = note.groups.find(x => x.projectId === project.id);
     if (existing) SECTIONS.forEach(s => existing.sections[s.key].push(...g.sections[s.key]));
     else note.groups.push({ projectId: project.id, sections: g.sections });
@@ -633,7 +725,7 @@ function expandGroups(notes) {
 }
 
 function transcriptForAi(note) {
-  return (note.segments || []).filter(s => s.text).map(s => s.text).join('\n\n');
+  return fullTranscript(note);
 }
 
 async function addKeyTerm(projectId, term) {
@@ -777,6 +869,30 @@ function wire() {
 
   // Note
   $('#note-followup').onclick = () => show('record', { mode: 'followup', noteId: state.viewOpts.id });
+  $('#note-addtype').onclick = () => show('type', { mode: 'append', noteId: state.viewOpts.id });
+  $('#note-correct').onclick = () => show('type', { mode: 'correct', noteId: state.viewOpts.id });
+  $('#note-correct-2').onclick = () => show('type', { mode: 'correct', noteId: state.viewOpts.id });
+  $('#note-confirm').onclick = async () => {
+    const note = state.notes.find(n => n.id === state.viewOpts.id);
+    if (!note) return;
+    note.needsReview = false;
+    note.updatedAt = Date.now();
+    await saveNote(note);
+    toast('Confirmed. The note is now in your weekly report.');
+    RENDER.note({ id: note.id });
+  };
+  $('#home-type').onclick = () => show('type', { mode: 'new' });
+  $('#rec-type').onclick = () => {
+    const o = state.viewOpts;
+    const target = o.mode === 'followup' ? { mode: 'append', noteId: o.noteId } : { mode: 'new' };
+    show('type', target, { replace: true });
+  };
+  $('#type-text').oninput = () => {
+    const n = $('#type-text').value.trim().split(/\s+/).filter(Boolean).length;
+    $('#type-count').textContent = `${n} word${n === 1 ? '' : 's'}`;
+  };
+  $('#type-cancel').onclick = () => history.back();
+  $('#type-save').onclick = saveTyped;
   $('#note-rerecord').onclick = () => show('record', { mode: 'rerecord', noteId: state.viewOpts.id });
   $('#note-delete').onclick = async () => {
     const note = state.notes.find(n => n.id === state.viewOpts.id);
@@ -1040,7 +1156,7 @@ function applyPolish(report, byProject) {
 async function polishReport() {
   if (!state.currentReport) return;
   const wk = currentWeek(state.reportOffset);
-  const notes = notesInWeek(wk).filter(n => n.status === 'done');
+  const notes = notesInWeek(wk).filter(n => n.status === 'done' && !n.needsReview);
   const draft = buildReport({ notes: expandGroups(notes), projects: state.projects, profile: state.settings.profile, start: wk.start, lastWorkday: wk.lastWorkday });
   const blocks = draft.projects.map(b => ({
     project: projectById(b.project.id) || { ...b.project, id: b.project.id || 'unassigned' },

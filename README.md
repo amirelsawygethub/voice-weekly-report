@@ -88,6 +88,12 @@ The proxy accepts only text-editing requests from the app's site, requires the a
 
 Data is stored per device and per browser. Installing the app to the home screen protects it from automatic browser clean-up on iOS.
 
+## Typing a note and correcting transcripts
+
+- **Type a note**: on Home (or from the record screen), tap **Prefer typing? Type a note**. Typed notes are analysed exactly like voice notes. On a note, **Add by typing** appends text.
+- **Review before reporting**: after a voice note is transcribed it is marked **Needs review** and is not added to the weekly report until confirmed. Tap **Looks good, add to report**, or **Correct transcript** to fix misheard names or numbers while listening to the recording. The note is rebuilt from the corrected text. Transcripts can be corrected again at any time from the note.
+- Correcting a project name teaches the app the right spelling; later notes that mishear it are filed under the corrected name.
+
 ## User guidelines for voice notes
 
 Just speak naturally; nothing needs to be selected. For the best results, name the project as you start, say "Moving to..." before switching to another project, and cover whatever applies of:
@@ -96,6 +102,7 @@ Just speak naturally; nothing needs to be selected. For the best results, name t
 2. **"The challenges were..."** Obstacles, delays or risks.
 3. **"Next week I will..."** Top priorities.
 4. **"I need support with..."** What help you need, and from whom. Skip it if none.
+5. **"We are waiting on..." / "...depends on..."** Dependencies, if any: inputs, approvals or deliverables your work is waiting on, and anyone waiting on you. They appear under Challenges (or Support when you ask for help to unblock them).
 
 Tips: speak in complete sentences, say names and acronyms clearly, and keep each note under 3 minutes. Sections with nothing reported are left out of the report. Add key names to a project's **Key terms** in Settings so they are always spelled correctly.
 

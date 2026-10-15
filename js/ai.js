@@ -105,6 +105,7 @@ Step 2. Extract the four sections for each project.
 - challenges: obstacles, delays, postponements, risks, problems.
 - priorities: what the speaker plans to do next week or next.
 - support: help, approvals, resources or decisions needed, and from whom when stated.
+- Dependencies (work waiting on someone else's input, approval or deliverable, or others waiting on the speaker) go under challenges, stated as "Dependent on ..." or "Awaiting ...". When the speaker asks for help to unblock a dependency, put that request under support.
 - Leave a section as an empty list when nothing was said for it. Do not write placeholders such as "None".
 
 Step 3. Edit into business writing.
