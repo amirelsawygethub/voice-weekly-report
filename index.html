@@ -146,8 +146,8 @@
       </div>
       <div class="card review-card" id="note-review" hidden>
         <h3>Check the transcript</h3>
-        <p class="muted">Speech recognition can mishear names and numbers. This note is added to your report once you confirm it.</p>
-        <p class="transcript" id="note-review-text"></p>
+        <p class="muted">Speech recognition can mishear names and numbers. This note is added to your report once you confirm it. Tap the text to correct it.</p>
+        <p class="transcript editable" id="note-review-text" role="button" tabindex="0" title="Tap to correct the transcript"></p>
         <div class="row gap">
           <button class="btn primary grow" id="note-confirm">Looks good, add to report</button>
           <button class="btn secondary grow" id="note-correct">Correct transcript</button>
@@ -161,7 +161,7 @@
       <details class="card">
         <summary>Recording and transcript</summary>
         <audio id="note-audio" controls preload="none"></audio>
-        <p id="note-transcript" class="transcript"></p>
+        <p id="note-transcript" class="transcript editable" role="button" tabindex="0" title="Tap to correct the transcript"></p>
         <button class="btn secondary block" id="note-correct-2">Correct transcript</button>
       </details>
       <div class="stack">

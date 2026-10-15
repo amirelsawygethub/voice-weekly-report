@@ -9,7 +9,7 @@ import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 // Bump when the on-device editing rules change, so older notes are re-edited.
 const RULES_VERSION = 7;
 const AUDIO_RETENTION_DAYS = 90;
@@ -412,13 +412,6 @@ const RENDER = {
       $('#type-label').textContent = 'Transcript';
       area.value = fullTranscript(note);
       $('#type-save').textContent = 'Save corrections';
-      const last = note.audioIds?.[note.audioIds.length - 1];
-      const blob = last ? await loadAudio(last) : null;
-      if (blob && state.view === 'type') {
-        audio.src = URL.createObjectURL(blob);
-        audio.dataset.url = audio.src;
-        audio.hidden = false;
-      }
     } else if (opts.mode === 'append' && note) {
       $('#type-intro').textContent = `Type what you want to add to "${note.title || 'this note'}".`;
       $('#type-label').textContent = 'Addition';
@@ -431,9 +424,59 @@ const RENDER = {
       $('#type-save').textContent = 'Save note';
     }
     area.oninput?.();
-    setTimeout(() => area.focus(), 50);
+    // Focus synchronously, while still inside the user's tap: iOS Safari only
+    // opens the on-screen keyboard for focus set during the gesture, and a
+    // deferred focus can be lost on other browsers too.
+    const caret = Number.isInteger(opts.caret) ? Math.min(opts.caret, area.value.length) : area.value.length;
+    area.focus({ preventScroll: opts.mode !== 'correct' });
+    area.setSelectionRange(caret, caret);
+
+    // Load the recording afterwards so it never delays the keyboard.
+    if (opts.mode === 'correct' && note) {
+      const last = note.audioIds?.[note.audioIds.length - 1];
+      const blob = last ? await loadAudio(last) : null;
+      if (blob && state.view === 'type') {
+        audio.src = URL.createObjectURL(blob);
+        audio.dataset.url = audio.src;
+        audio.hidden = false;
+      }
+    }
   }
 };
+
+// Character offset in a transcript paragraph under the pointer, so the editor
+// opens with the cursor where the user tapped. Supports both standard
+// (caretPositionFromPoint) and WebKit/Blink (caretRangeFromPoint) APIs.
+function caretOffsetFromPoint(el, x, y) {
+  let node = null;
+  let offset = 0;
+  if (document.caretPositionFromPoint) {
+    const pos = document.caretPositionFromPoint(x, y);
+    if (pos) { node = pos.offsetNode; offset = pos.offset; }
+  } else if (document.caretRangeFromPoint) {
+    const range = document.caretRangeFromPoint(x, y);
+    if (range) { node = range.startContainer; offset = range.startOffset; }
+  }
+  if (!node || !el.contains(node)) return null;
+  const range = document.createRange();
+  range.setStart(el, 0);
+  range.setEnd(node, offset);
+  return range.toString().length;
+}
+
+// Clicking (or pressing Enter/Space on) a transcript opens it for correction.
+function openTranscriptEditor(e) {
+  const note = state.notes.find(n => n.id === state.viewOpts.id);
+  if (!note || note.status !== 'done') return;
+  if (e.type === 'keydown') {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+  }
+  // Let users select text to copy without opening the editor.
+  if (e.type === 'click' && String(window.getSelection?.() || '').trim()) return;
+  const caret = e.type === 'click' ? caretOffsetFromPoint(e.currentTarget, e.clientX, e.clientY) : null;
+  show('type', { mode: 'correct', noteId: note.id, caret });
+}
 
 async function saveTyped() {
   const opts = state.viewOpts;
@@ -872,6 +915,10 @@ function wire() {
   $('#note-addtype').onclick = () => show('type', { mode: 'append', noteId: state.viewOpts.id });
   $('#note-correct').onclick = () => show('type', { mode: 'correct', noteId: state.viewOpts.id });
   $('#note-correct-2').onclick = () => show('type', { mode: 'correct', noteId: state.viewOpts.id });
+  for (const sel of ['#note-review-text', '#note-transcript']) {
+    $(sel).onclick = openTranscriptEditor;
+    $(sel).onkeydown = openTranscriptEditor;
+  }
   $('#note-confirm').onclick = async () => {
     const note = state.notes.find(n => n.id === state.viewOpts.id);
     if (!note) return;
