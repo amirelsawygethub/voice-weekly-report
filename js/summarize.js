@@ -22,7 +22,7 @@ const STRONG = [
 
 // Weak cues classify a single sentence without changing the running section.
 const WEAK = {
-  achievements: /\b(completed?|finished|delivered|launched|finali[sz]ed|submitted|achieved|accomplished|managed to|successfully|signed|approved|held|conducted|trained|onboarded|published|closed|resolved)\b/,
+  achievements: /\b(completed?|finished|delivered|launched|finali[sz]ed|submitted|achieved|accomplished|managed to|successfully|signed|approved|held|conducted|trained|onboarded|published|closed|resolved|confirmed|agreed|secured|received|recruited|hired|printed|distributed|visited|attended|organi[sz]ed|drafted|presented)\b/,
   challenges: /\b(delay(ed|s)?|blocked|depend(s|ent|ing)? on|dependenc(y|ies)|wait(ing)? (on|for)|pending|postponed|cancel+ed|rescheduled|on hold|stalled|struggl\w*|unable to|could ?n[o']t|failed|shortage|unstable|lack of|behind schedule|overdue|bottleneck|pending approval|risk)\b/,
   priorities: /\b(i|we) (will|'ll|plan to|intend to|am going to|are going to|aim to)\b|\b(i'll|we'll)\b|\bupcoming\b|\bby (monday|tuesday|wednesday|thursday|friday|sunday|saturday|the end of)\b/,
   support: /\b(need|require) (help|support|approval|assistance|guidance)\b|\bhelp from\b/

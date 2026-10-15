@@ -9,9 +9,9 @@ import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.5.2';
 // Bump when the on-device editing rules change, so older notes are re-edited.
-const RULES_VERSION = 7;
+const RULES_VERSION = 8;
 const AUDIO_RETENTION_DAYS = 90;
 const APP_URL = new URL('./', location.href).href;
 
@@ -291,11 +291,12 @@ const RENDER = {
     if (done) {
       const groups = noteGroups(note);
       const multi = groups.length > 1;
-      box.innerHTML = groups.map(g => {
+      const pointsHtml = groups.map(g => {
         const secs = SECTIONS.filter(s => g.sections[s.key]?.length)
-          .map(s => `<div class="sec"><h4>${esc(s.label)}</h4><ul>${g.sections[s.key].map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>`).join('');
+          .map(s => `<div class="sec"><h4>${esc(s.label)}</h4><ul>${g.sections[s.key].map(i => `<li class="point" role="button" tabindex="0" title="Tap to edit">${esc(i)}</li>`).join('')}</ul></div>`).join('');
         return multi ? `<div class="grp"><h3 class="grp-name">${esc(projectTitle(projectById(g.projectId) || { name: 'Unassigned project' }))}</h3>${secs}</div>` : secs;
-      }).join('') || '<div class="empty">No report content was detected. Please re-record and describe your progress, challenges, priorities and any support needed.</div>';
+      }).join('');
+      box.innerHTML = pointsHtml ? pointsHtml + '<p class="fine edit-hint">Tap any point to edit this note.</p>' : '<div class="empty">No report content was detected. Please re-record and describe your progress, challenges, priorities and any support needed.</div>';
     } else if (note.status === 'review') {
       box.innerHTML = '<div class="banner warn">Very little speech was detected. Please re-record in a quieter place, closer to the microphone.</div>';
     } else if (note.status === 'error') {
@@ -377,7 +378,8 @@ const RENDER = {
     }
     $('#rep-status').innerHTML += polishedNote;
     $('#rep-polish').hidden = !ai.isConfigured(state.ai);
-    $('#rep-body').innerHTML = reportToHTML(state.currentReport);
+    $('#rep-body').innerHTML = reportToHTML(state.currentReport)
+      + (polishedNote.includes('polished by') ? '' : '<p class="fine edit-hint">Tap a point to open and edit the note it came from.</p>');
   },
 
   async settings() {
@@ -462,6 +464,41 @@ function caretOffsetFromPoint(el, x, y) {
   range.setStart(el, 0);
   range.setEnd(node, offset);
   return range.toString().length;
+}
+
+// Position in the transcript of the sentence a bullet came from: the spot
+// where most of the bullet's significant words occur together.
+function locateInTranscript(point, text) {
+  const lower = text.toLowerCase();
+  const words = [...new Set(point.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length > 3))];
+  let best = { score: 0, index: -1 };
+  for (const w of words) {
+    for (let i = lower.indexOf(w); i >= 0; i = lower.indexOf(w, i + 1)) {
+      const windowText = lower.slice(Math.max(0, i - 80), i + 160);
+      const score = words.filter(x => windowText.includes(x)).length;
+      if (score > best.score) best = { score, index: i };
+    }
+  }
+  if (best.index < 0) return null;
+  let start = best.index;
+  while (start > 0 && !/[.!?\n]/.test(text[start - 1])) start--;
+  while (start < text.length && /\s/.test(text[start])) start++;
+  return start;
+}
+
+// Clicking (or pressing Enter/Space on) a bullet opens the note's text for
+// editing, with the cursor on the sentence that bullet came from.
+function openPointEditor(e) {
+  const li = e.target.closest('li.point');
+  if (!li) return;
+  const note = state.notes.find(n => n.id === state.viewOpts.id);
+  if (!note || note.status !== 'done') return;
+  if (e.type === 'keydown') {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+  }
+  if (e.type === 'click' && String(window.getSelection?.() || '').trim()) return;
+  show('type', { mode: 'correct', noteId: note.id, caret: locateInTranscript(li.textContent, fullTranscript(note)) });
 }
 
 // Clicking (or pressing Enter/Space on) a transcript opens it for correction.
@@ -701,21 +738,41 @@ async function processNote(note) {
 // four sections for each. Nobody selects a project or a tag.
 // The transcript as the user last saw it: their corrected text for the
 // segments it covers, plus any segments added after the correction.
-function fullTranscript(note) {
+function transcriptParts(note) {
   const segs = note.segments || [];
   const edit = note.transcriptEdit;
-  const rest = segs.slice(edit ? edit.segments : 0).map(s => s.text || '').filter(Boolean);
-  return [edit ? edit.text : '', ...rest].filter(Boolean).join(edit ? '\n\n' : ' ').trim();
+  const rest = segs.slice(edit ? edit.segments : 0).map(s => (s.text || '').trim());
+  return [edit ? edit.text.trim() : '', ...rest].filter(Boolean);
+}
+
+function fullTranscript(note) {
+  return transcriptParts(note).join('\n\n');
 }
 
 async function resummarise(note) {
   note.transcript = fullTranscript(note);
   const fallback = projectById(note.projectId)?.name || (state.projects.length === 1 ? state.projects[0].name : GENERAL);
-  const result = note.transcript ? analyse(note.transcript, state.projects, fallback) : { title: '', groups: [] };
+  // Each recording or typed addition is analysed as its own statement, so an
+  // addition does not inherit the section of the previous text's last sentence.
+  // An addition that names no project stays with the project last talked about.
+  const groups = [];
+  let partFallback = fallback;
+  for (const part of transcriptParts(note)) {
+    const r = analyse(part, state.projects, partFallback);
+    for (const g of r.groups) {
+      const same = groups.find(x => normName(x.name) === normName(g.name));
+      if (same) SECTIONS.forEach(sec => same.sections[sec.key].push(...g.sections[sec.key]));
+      else groups.push(g);
+    }
+    if (r.groups.length) partFallback = r.groups[r.groups.length - 1].name;
+  }
+  const result = note.transcript ? analyse(note.transcript, state.projects, fallback) : { title: '' };
   // Text the user typed or corrected is trusted for project spelling.
   const trusted = !!note.transcriptEdit || (note.segments || []).every(s => s.typed);
-  await setGroups(note, result.groups, trusted);
-  note.title = result.title;
+  await setGroups(note, groups, trusted);
+  note.title = groups.length > 1
+    ? `${groups.map(g => g.name).join(groups.length > 2 ? ', ' : ' and ')} updates`
+    : result.title;
   note.editor = 'standard';
   note.aiTips = [];
   note.rulesVersion = RULES_VERSION;
@@ -915,6 +972,12 @@ function wire() {
   $('#note-addtype').onclick = () => show('type', { mode: 'append', noteId: state.viewOpts.id });
   $('#note-correct').onclick = () => show('type', { mode: 'correct', noteId: state.viewOpts.id });
   $('#note-correct-2').onclick = () => show('type', { mode: 'correct', noteId: state.viewOpts.id });
+  $('#note-sections').onclick = openPointEditor;
+  $('#note-sections').onkeydown = openPointEditor;
+  $('#rep-body').onkeydown = e => {
+    const li = e.target.closest('li[data-note]');
+    if (li && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); show('note', { id: li.dataset.note }); }
+  };
   for (const sel of ['#note-review-text', '#note-transcript']) {
     $(sel).onclick = openTranscriptEditor;
     $(sel).onkeydown = openTranscriptEditor;
@@ -1196,7 +1259,7 @@ function applyPolish(report, byProject) {
   for (const block of report.projects) {
     const p = byProject[block.project.id];
     if (!p) continue;
-    for (const s of block.sections) { s.items = p[s.key] || []; s.omitted = 0; }
+    for (const s of block.sections) { s.items = p[s.key] || []; s.sources = []; s.omitted = 0; }
   }
 }
 

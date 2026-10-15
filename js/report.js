@@ -35,11 +35,12 @@ export function weekKey(start) {
   return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
 }
 
+// Entries are { text, noteId } so each report point can link to its note.
 function dedupe(list) {
   const out = [];
   // Later notes win, so corrections replace earlier near-duplicates.
   for (let i = list.length - 1; i >= 0; i--) {
-    if (!out.some(b => similar(b, list[i]))) out.unshift(list[i]);
+    if (!out.some(b => similar(b.text, list[i].text))) out.unshift(list[i]);
   }
   return out;
 }
@@ -52,7 +53,7 @@ export function buildReport({ notes, projects, profile, start, lastWorkday }) {
     if (!n.sections) continue;
     if (!byProject.has(n.projectId)) byProject.set(n.projectId, { achievements: [], challenges: [], priorities: [], support: [], noneSupport: false, noneChallenges: false });
     const agg = byProject.get(n.projectId);
-    for (const s of SECTIONS) agg[s.key].push(...(n.sections[s.key] || []));
+    for (const s of SECTIONS) agg[s.key].push(...(n.sections[s.key] || []).map(text => ({ text, noteId: n.id })));
     if (n.sections.none?.support) agg.noneSupport = true;
     if (n.sections.none?.challenges) agg.noneChallenges = true;
   }
@@ -63,9 +64,9 @@ export function buildReport({ notes, projects, profile, start, lastWorkday }) {
     .map(([projectId, agg]) => {
       const project = projects.find(p => p.id === projectId) || { name: 'Unassigned project' };
       const sections = SECTIONS.map(s => {
-        const all = dedupe(agg[s.key].map(stripDashes));
-        const items = all.slice(-MAX_PER_SECTION);
-        return { ...s, items, omitted: all.length - items.length };
+        const all = dedupe(agg[s.key].map(e => ({ ...e, text: stripDashes(e.text) })));
+        const kept = all.slice(-MAX_PER_SECTION);
+        return { ...s, items: kept.map(e => e.text), sources: kept.map(e => e.noteId), omitted: all.length - kept.length };
       });
       return { project, sections };
     });
@@ -102,7 +103,9 @@ export function reportToHTML(report) {
     // Sections with nothing reported are left out rather than filled with placeholders.
     for (const s of block.sections.filter(x => x.items.length)) {
       html += `<h4>${esc(s.label)}</h4><ul>`;
-      html += s.items.map(i => `<li>${esc(i)}</li>`).join('');
+      html += s.items.map((i, k) => s.sources?.[k]
+        ? `<li class="point" data-note="${esc(s.sources[k])}" role="button" tabindex="0" title="Open the note">${esc(i)}</li>`
+        : `<li>${esc(i)}</li>`).join('');
       html += '</ul>';
       if (s.omitted) html += `<div class="fine">${s.omitted} earlier point(s) condensed. Delete or re-record notes to adjust.</div>`;
     }
