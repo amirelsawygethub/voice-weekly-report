@@ -16,7 +16,8 @@
  * Who has access: Anyone. Use the URL ending in /exec in the app.
  */
 
-const DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+// Fastest first: 3.8 Flash took over 100 s per note in testing; 3.5 Flash-Lite about 1-4 s.
+const DEFAULT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
 const MAX_INPUT_CHARS = 30000;
 const MAX_PROMPT_CHARS = 8000;     // script property values are limited to 9 KB
 const RATE_LIMIT_PER_MINUTE = 120;

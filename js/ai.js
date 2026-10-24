@@ -63,9 +63,9 @@ function callServer(cfg, action, content) {
 }
 
 // ---- Google Gemini ----
-// Newest stable Flash model first; older ones are tried if a model is not
-// available to the user's key.
-const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+// Fastest model first (3.8 Flash was very slow for this task in testing);
+// the others are tried if a model is not available to the user's key.
+const GEMINI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 export const GEMINI_KEY_PAGE = 'https://aistudio.google.com/apikey';
 

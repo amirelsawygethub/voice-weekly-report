@@ -80,7 +80,7 @@ After 5 wrong admin passwords, admin sign-in is blocked for 15 minutes. Choose a
 1. Tap **Get your free Gemini key**. Google AI Studio opens; sign in with your Google account and tap **Create API key**, then copy it.
 2. Back in the app, tap **Paste key and connect**.
 
-The app uses the newest stable Gemini Flash model and falls back to older Flash models if needed. Privacy: on the **free** Gemini tier, Google may use submitted text to improve its products and human reviewers may read it. For confidential work, enable billing on the key's Google Cloud project (paid tier), where Google does not use prompts or responses to improve its products.
+The app uses Gemini 3.5 Flash-Lite (about 1 to 4 seconds per note) and falls back to other Flash models if needed. Privacy: on the **free** Gemini tier, Google may use submitted text to improve its products and human reviewers may read it. For confidential work, enable billing on the key's Google Cloud project (paid tier), where Google does not use prompts or responses to improve its products.
 
 ### Claude options
 
