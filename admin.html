@@ -24,11 +24,17 @@
   <main class="admin">
     <section class="view" id="admin-login">
       <div class="card">
-        <h3>Connect to your team AI server</h3>
-        <p class="muted">For admins only. Use the web app URL of your team's Apps Script server and the ADMIN_TOKEN from its script properties.</p>
-        <label class="field">Server URL <input id="adm-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/.../exec"></label>
-        <label class="field">Admin token <input id="adm-token" type="password" autocomplete="off" spellcheck="false"></label>
-        <button class="btn primary block" id="adm-connect">Connect</button>
+        <h3>Admin sign-in</h3>
+        <p class="muted">Enter the admin password to manage the team AI assistant.</p>
+        <form id="adm-form" autocomplete="on">
+          <input type="text" name="username" value="team-admin" autocomplete="username" hidden>
+          <label class="field">Admin password <input id="adm-token" name="password" type="password" autocomplete="current-password" spellcheck="false" required></label>
+          <details id="adm-server-box">
+            <summary class="fine">Team server address</summary>
+            <label class="field" style="margin-top:8px">Server URL <input id="adm-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/.../exec"></label>
+          </details>
+          <button class="btn primary block" id="adm-connect" type="submit">Sign in</button>
+        </form>
         <div class="fine" id="adm-login-status"></div>
       </div>
     </section>

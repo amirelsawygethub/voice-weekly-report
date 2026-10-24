@@ -7,7 +7,9 @@
  * Script properties (Project Settings > Script properties):
  *   GEMINI_API_KEY  required  key from https://aistudio.google.com/apikey
  *   TEAM_CODE       required  shared code colleagues use (run setupTokens())
- *   ADMIN_TOKEN     required  secret for the admin page (run setupTokens())
+ *   ADMIN_TOKEN     required  the admin password for the Team admin page.
+ *                             Type it in Script properties yourself; it is
+ *                             never written to the log or sent back.
  *   GEMINI_MODELS   optional  comma-separated model list, newest first
  *
  * Deploy: Deploy > New deployment > Web app; Execute as: Me;
@@ -18,6 +20,8 @@ const DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flas
 const MAX_INPUT_CHARS = 30000;
 const MAX_PROMPT_CHARS = 8000;     // script property values are limited to 9 KB
 const RATE_LIMIT_PER_MINUTE = 120;
+const ADMIN_MAX_FAILURES = 5;      // wrong admin passwords allowed...
+const ADMIN_LOCKOUT_SECONDS = 900; // ...before admin sign-in is blocked for 15 minutes
 
 const STYLE_RULES = `Style rules for every bullet:
 - One idea per bullet, at most 20 words, ending with a full stop.
@@ -126,7 +130,12 @@ function doPost(e) {
     const props = PropertiesService.getScriptProperties();
 
     if (action.indexOf('admin') === 0) {
-      if (!checkSecret_(req.adminToken, props.getProperty('ADMIN_TOKEN'))) return error_(401, 'Admin token not accepted.');
+      if (adminLocked_()) return error_(429, 'Too many wrong passwords. Admin sign-in is blocked for 15 minutes.');
+      if (!checkSecret_(req.adminToken, props.getProperty('ADMIN_TOKEN'))) {
+        recordAdminFailure_();
+        return error_(401, 'Password not accepted.');
+      }
+      CacheService.getScriptCache().remove('admin-failures');
     } else if (!checkSecret_(req.teamCode, props.getProperty('TEAM_CODE'))) {
       return error_(401, 'Team code not accepted.');
     }
@@ -255,14 +264,14 @@ function adminRestorePrevious_(props) {
 /* ---------------- Setup helper ---------------- */
 
 // Run once from the Apps Script editor (select setupTokens, click Run).
-// Creates TEAM_CODE and ADMIN_TOKEN if missing and prints them to the log,
-// which only the script owner can see.
+// Creates TEAM_CODE if missing and prints it to the log (visible only to the
+// script owner). The admin password (ADMIN_TOKEN) is set by hand in Script
+// properties and is never printed.
 function setupTokens() {
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('TEAM_CODE')) props.setProperty('TEAM_CODE', randomToken_(10));
-  if (!props.getProperty('ADMIN_TOKEN')) props.setProperty('ADMIN_TOKEN', randomToken_(32));
   Logger.log('TEAM_CODE (share with colleagues): ' + props.getProperty('TEAM_CODE'));
-  Logger.log('ADMIN_TOKEN (keep private, for the admin page): ' + props.getProperty('ADMIN_TOKEN'));
+  Logger.log('Admin password (ADMIN_TOKEN) set: ' + !!props.getProperty('ADMIN_TOKEN'));
   Logger.log('GEMINI_API_KEY set: ' + !!props.getProperty('GEMINI_API_KEY'));
 }
 
@@ -289,6 +298,16 @@ function checkSecret_(given, expected) {
   let diff = 0;
   for (let i = 0; i < given.length; i++) diff |= given.charCodeAt(i) ^ expected.charCodeAt(i);
   return diff === 0;
+}
+
+function adminLocked_() {
+  return Number(CacheService.getScriptCache().get('admin-failures') || 0) >= ADMIN_MAX_FAILURES;
+}
+
+function recordAdminFailure_() {
+  const cache = CacheService.getScriptCache();
+  const n = Number(cache.get('admin-failures') || 0) + 1;
+  cache.put('admin-failures', String(n), ADMIN_LOCKOUT_SECONDS);
 }
 
 function rateLimitOk_() {

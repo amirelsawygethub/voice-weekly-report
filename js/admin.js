@@ -66,7 +66,13 @@ async function connect() {
     render();
   } catch (err) {
     console.error(err);
-    $('#adm-login-status').textContent = err.status === 401 ? 'The admin token was not accepted.' : err.message;
+    $('#adm-login-status').textContent = err.status === 401 ? 'Password not accepted.' : err.message;
+    if (err.status === 401 || err.status === 429) {
+      // A wrong or locked-out password must not be remembered.
+      await db.del('settings', 'admin').catch(() => {});
+      $('#adm-token').value = '';
+      $('#adm-token').focus();
+    }
   }
   $('#adm-connect').disabled = false;
 }
@@ -85,11 +91,14 @@ function renderTest(out) {
 }
 
 function wire() {
-  $('#adm-connect').onclick = () => {
+  $('#adm-form').onsubmit = e => {
+    e.preventDefault();
     const url = $('#adm-url').value.trim();
-    const token = $('#adm-token').value.trim();
-    if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url) || !token) {
-      $('#adm-login-status').textContent = 'Enter the Apps Script web app URL (https://script.google.com/...) and the admin token.';
+    const token = $('#adm-token').value;
+    if (!token) { $('#adm-login-status').textContent = 'Enter the admin password.'; return; }
+    if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)) {
+      $('#adm-server-box').open = true;
+      $('#adm-login-status').textContent = 'The team server address is not set yet. Enter the Apps Script web app URL (https://script.google.com/...).';
       return;
     }
     creds = { url, token, name: creds?.name || '' };
@@ -154,8 +163,23 @@ function wire() {
   };
 }
 
+// The team server address is published in config.json, so admins only need
+// the password. It is not a secret: every request still needs a password or
+// team code that only the server knows.
+async function serverUrlFromConfig() {
+  try {
+    const cfg = await fetch('config.json', { cache: 'no-store' }).then(r => r.json());
+    return typeof cfg.teamServerUrl === 'string' ? cfg.teamServerUrl.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 async function boot() {
   wire();
+  const configured = await serverUrlFromConfig();
+  $('#adm-url').value = configured;
+  $('#adm-server-box').open = !configured;
   try {
     const rec = await db.get('settings', 'admin');
     if (rec) creds = await decryptJSON(rec);
@@ -163,8 +187,11 @@ async function boot() {
     console.error(err);
   }
   if (creds?.url && creds?.token) {
-    $('#adm-url').value = creds.url;
+    if (!configured) $('#adm-url').value = creds.url;
+    $('#adm-server-box').open = false;
     connect();
+  } else {
+    $('#adm-token').focus();
   }
 }
 

@@ -62,10 +62,14 @@ The organisation's Gemini key and the AI prompts live in a small Google Apps Scr
 
 1. Go to [script.google.com](https://script.google.com), create a new project and replace the contents of `Code.gs` with [`server/apps-script/Code.gs`](server/apps-script/Code.gs).
 2. **Project Settings > Script properties > Add script property**: `GEMINI_API_KEY` = a key from [Google AI Studio](https://aistudio.google.com/apikey). Use a key from a billing-enabled project for confidential work (paid tier: Google does not use the text to improve its products).
-3. In the editor, select the function `setupTokens` and click **Run** (approve the permissions). Open **Execution log** to see the generated `TEAM_CODE` and `ADMIN_TOKEN`. Keep the admin token private.
-4. **Deploy > New deployment > Web app**. Execute as: **Me**. Who has access: **Anyone**. Copy the web app URL (ends in `/exec`).
-5. In the app, open **Settings > Team admin** (or `admin.html`), enter the URL and the admin token, and tap **Connect**.
-6. Copy the **invite link** and send it to colleagues. Opening it on a phone connects the app automatically.
+3. Add a second script property, `ADMIN_TOKEN`, set to the admin password of your choice. It is only ever stored here: it is not in the app, the repository or any log.
+4. In the editor, select the function `setupTokens` and click **Run** (approve the permissions). Open **Execution log** to see the generated `TEAM_CODE`.
+5. **Deploy > New deployment > Web app**. Execute as: **Me**. Who has access: **Anyone**. Copy the web app URL (ends in `/exec`).
+6. Put that URL in [`config.json`](config.json) as `teamServerUrl` (or enter it once on the admin page under **Team server address**).
+7. Open **Settings > Team admin** (or `admin.html`), enter the admin password and tap **Sign in**. The page remembers you on that device until you sign out.
+8. Copy the **invite link** and send it to colleagues. Opening it on a phone connects the app automatically.
+
+After 5 wrong admin passwords, admin sign-in is blocked for 15 minutes. Choose a long password: the server address is public, so a short one can be guessed.
 
 **Admin page:** edit the note analysis prompt and the weekly polish prompt, test a draft on a sample note before saving, see who changed the prompts and when, reset to the defaults, or restore the previous version. Output formats are fixed by the server, so prompt edits cannot break the app.
 
