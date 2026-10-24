@@ -145,9 +145,9 @@ function doPost(e) {
       case 'ping':
         return ok_({ status: 'connected' });
       case 'analyseNote':
-        return ok_(generate_(getPrompt_('NOTE_PROMPT', DEFAULT_NOTE_PROMPT), limit_(req.content), NOTE_SCHEMA));
+        return generated_(generate_(getPrompt_('NOTE_PROMPT', DEFAULT_NOTE_PROMPT), limit_(req.content), NOTE_SCHEMA), req.debug);
       case 'polishWeek':
-        return ok_(generate_(getPrompt_('WEEK_PROMPT', DEFAULT_WEEK_PROMPT), limit_(req.content), WEEK_SCHEMA));
+        return generated_(generate_(getPrompt_('WEEK_PROMPT', DEFAULT_WEEK_PROMPT), limit_(req.content), WEEK_SCHEMA), req.debug);
       case 'adminGetConfig':
         return ok_(adminConfig_(props));
       case 'adminSetPrompts':
@@ -155,7 +155,7 @@ function doPost(e) {
       case 'adminRestorePrevious':
         return ok_(adminRestorePrevious_(props));
       case 'adminTest':
-        return ok_(generate_(validPrompt_(req.notePrompt) || getPrompt_('NOTE_PROMPT', DEFAULT_NOTE_PROMPT), limit_(req.content), NOTE_SCHEMA));
+        return generated_(generate_(validPrompt_(req.notePrompt) || getPrompt_('NOTE_PROMPT', DEFAULT_NOTE_PROMPT), limit_(req.content), NOTE_SCHEMA), true);
       default:
         return error_(400, 'Unknown action.');
     }
@@ -166,44 +166,84 @@ function doPost(e) {
 
 /* ---------------- Gemini ---------------- */
 
+// Calls Gemini and returns { result, meta }. meta records each attempt
+// (model, options, HTTP status, milliseconds) for diagnosing slow requests;
+// it never contains the key, the prompt or the note text.
+//
+// The combination that last worked (model, JSON-schema mode, thinking level)
+// is cached for 6 hours, so later requests skip attempts that are known to
+// fail. Low thinking keeps this extraction task fast.
 function generate_(systemPrompt, content, schema) {
-  const key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  const props = PropertiesService.getScriptProperties();
+  const key = props.getProperty('GEMINI_API_KEY');
   if (!key) throw httpError_(500, 'The server has no Gemini API key. Ask your admin to add GEMINI_API_KEY.');
-  const configured = PropertiesService.getScriptProperties().getProperty('GEMINI_MODELS');
+  const configured = props.getProperty('GEMINI_MODELS');
   const models = configured ? configured.split(',').map(s => s.trim()).filter(String) : DEFAULT_MODELS;
-  let last = httpError_(502, 'No Gemini model is available.');
+  const cache = CacheService.getScriptCache();
+  const remembered = safeJson_(cache.get('gemini-working') || 'null');
 
-  for (let m = 0; m < models.length; m++) {
-    // Native JSON-schema output first; schema in the prompt as a fallback.
-    for (const native of [true, false]) {
-      const body = {
-        systemInstruction: { parts: [{ text: native ? systemPrompt : systemPrompt + '\n\nRespond only with JSON that matches this JSON Schema:\n' + JSON.stringify(schema) }] },
-        contents: [{ role: 'user', parts: [{ text: content }] }],
-        generationConfig: Object.assign({ responseMimeType: 'application/json' }, native ? { responseJsonSchema: schema } : {})
-      };
-      const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(models[m]) + ':generateContent', {
+  // Attempt plan: remembered combination first, then each model with the
+  // fastest options, falling back to more compatible ones.
+  const plan = [];
+  if (remembered && models.indexOf(remembered.model) >= 0) plan.push(remembered);
+  models.forEach(model => {
+    [{ native: true, thinking: true }, { native: true, thinking: false }, { native: false, thinking: false }]
+      .forEach(o => plan.push({ model: model, native: o.native, thinking: o.thinking }));
+  });
+
+  const meta = { attempts: [] };
+  const skipModels = {};
+  let last = httpError_(502, 'No Gemini model is available.');
+  const started = Date.now();
+
+  for (let i = 0; i < plan.length; i++) {
+    const a = plan[i];
+    if (skipModels[a.model]) continue;
+    if (Date.now() - started > 240000) break; // stay inside the 6-minute script limit
+    const generationConfig = { responseMimeType: 'application/json' };
+    if (a.native) generationConfig.responseJsonSchema = schema;
+    if (a.thinking) generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+    const body = {
+      systemInstruction: { parts: [{ text: a.native ? systemPrompt : systemPrompt + '\n\nRespond only with JSON that matches this JSON Schema:\n' + JSON.stringify(schema) }] },
+      contents: [{ role: 'user', parts: [{ text: content }] }],
+      generationConfig: generationConfig
+    };
+    const t0 = Date.now();
+    let res;
+    try {
+      res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(a.model) + ':generateContent', {
         method: 'post',
         contentType: 'application/json',
         headers: { 'x-goog-api-key': key },
         payload: JSON.stringify(body),
         muteHttpExceptions: true
       });
-      const status = res.getResponseCode();
-      const data = safeJson_(res.getContentText());
-      if (status === 200) {
-        const cand = data && data.candidates && data.candidates[0];
-        if (!cand) throw httpError_(422, 'Gemini declined this text.');
-        const text = ((cand.content && cand.content.parts) || []).filter(p => !p.thought).map(p => p.text || '').join('');
-        const parsed = safeJson_(text);
-        if (!parsed) throw httpError_(502, 'Gemini returned an unreadable response.');
-        return parsed;
-      }
-      const message = (data && data.error && data.error.message) || ('HTTP ' + status);
-      last = httpError_(status === 400 || status === 403 ? 502 : status, 'Gemini error: ' + message);
-      if (status === 404) break;
-      if (status === 400 && native && /schema/i.test(message)) continue;
-      throw last;
+    } catch (err) {
+      meta.attempts.push({ model: a.model, native: a.native, thinking: a.thinking, status: 'fetch-error', ms: Date.now() - t0 });
+      last = httpError_(504, 'Gemini did not respond in time.');
+      skipModels[a.model] = true;
+      continue;
     }
+    const status = res.getResponseCode();
+    meta.attempts.push({ model: a.model, native: a.native, thinking: a.thinking, status: status, ms: Date.now() - t0 });
+    const data = safeJson_(res.getContentText());
+    if (status === 200) {
+      const cand = data && data.candidates && data.candidates[0];
+      if (!cand) throw httpError_(422, 'Gemini declined this text.');
+      const text = ((cand.content && cand.content.parts) || []).filter(p => !p.thought).map(p => p.text || '').join('');
+      const parsed = safeJson_(text);
+      if (!parsed) { last = httpError_(502, 'Gemini returned an unreadable response.'); continue; }
+      cache.put('gemini-working', JSON.stringify({ model: a.model, native: a.native, thinking: a.thinking }), 21600);
+      meta.totalMs = Date.now() - started;
+      return { result: parsed, meta: meta };
+    }
+    const message = (data && data.error && data.error.message) || ('HTTP ' + status);
+    last = httpError_(status === 400 || status === 403 ? 502 : status, 'Gemini error: ' + message);
+    if (status === 401 || status === 403) throw last;                    // key problem: retrying won't help
+    if (status === 404) { skipModels[a.model] = true; continue; }        // model not available
+    if (status === 400) continue;                                        // option not supported: try the next one
+    if (status === 429 || status >= 500) { skipModels[a.model] = true; continue; } // busy: try another model
+    throw last;
   }
   throw last;
 }
@@ -336,6 +376,12 @@ function httpError_(status, message) {
 }
 
 function ok_(data) { return json_({ ok: true, data: data }); }
+// Model output, with timing diagnostics only when asked for (debug / admin test).
+function generated_(g, withMeta) {
+  const data = g.result;
+  if (withMeta) data._meta = g.meta;
+  return ok_(data);
+}
 function error_(status, message) { return json_({ ok: false, status: status, error: message }); }
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
