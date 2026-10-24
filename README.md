@@ -54,7 +54,24 @@ Microphone ─► Encrypted audio (on device) ─► Whisper speech-to-text (on 
 
 Turn it on in **Settings > AI writing assistant**, or tap **Connect** on the Home banner. If it is off, offline or unavailable, the on-device edit is used automatically, so a report is always produced.
 
-### Google Gemini (default, free with a Google account)
+### Team server (recommended for organisations)
+
+The organisation's Gemini key and the AI prompts live in a small Google Apps Script web app owned by the admin. Phones never store or send an API key: they send only the note text and a team code. Admins can change the prompts at any time from the **Team admin** page without redeploying the app.
+
+**One-time setup (admin, about 10 minutes):**
+
+1. Go to [script.google.com](https://script.google.com), create a new project and replace the contents of `Code.gs` with [`server/apps-script/Code.gs`](server/apps-script/Code.gs).
+2. **Project Settings > Script properties > Add script property**: `GEMINI_API_KEY` = a key from [Google AI Studio](https://aistudio.google.com/apikey). Use a key from a billing-enabled project for confidential work (paid tier: Google does not use the text to improve its products).
+3. In the editor, select the function `setupTokens` and click **Run** (approve the permissions). Open **Execution log** to see the generated `TEAM_CODE` and `ADMIN_TOKEN`. Keep the admin token private.
+4. **Deploy > New deployment > Web app**. Execute as: **Me**. Who has access: **Anyone**. Copy the web app URL (ends in `/exec`).
+5. In the app, open **Settings > Team admin** (or `admin.html`), enter the URL and the admin token, and tap **Connect**.
+6. Copy the **invite link** and send it to colleagues. Opening it on a phone connects the app automatically.
+
+**Admin page:** edit the note analysis prompt and the weekly polish prompt, test a draft on a sample note before saving, see who changed the prompts and when, reset to the defaults, or restore the previous version. Output formats are fixed by the server, so prompt edits cannot break the app.
+
+**Updating the server code later:** paste the new `Code.gs`, then **Deploy > Manage deployments > Edit > Version: New version > Deploy**. The URL stays the same.
+
+### Google Gemini with your own key
 
 1. Tap **Get your free Gemini key**. Google AI Studio opens; sign in with your Google account and tap **Create API key**, then copy it.
 2. Back in the app, tap **Paste key and connect**.

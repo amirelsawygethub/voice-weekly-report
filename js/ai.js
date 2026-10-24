@@ -32,8 +32,34 @@ async function getClient(cfg) {
 
 export function isConfigured(cfg) {
   if (!cfg || !cfg.enabled) return false;
+  if (cfg.mode === 'server') return !!cfg.serverUrl && !!cfg.teamCode;
   if (cfg.mode === 'gemini') return !!cfg.geminiKey;
   return cfg.mode === 'proxy' ? !!cfg.proxyUrl : !!cfg.apiKey;
+}
+
+// ---- Team server (Google Apps Script) ----
+// The organisation's Gemini key and the AI prompts live on the server, so no
+// API key is stored on phones or sent from them. Requests are text/plain JSON
+// so browsers send them without a CORS preflight.
+class ServerError extends Error {
+  constructor(status, message) { super(message); this.status = status; this.provider = 'server'; }
+}
+
+export async function serverRequest(url, body) {
+  let res;
+  try {
+    res = await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), redirect: 'follow' });
+  } catch {
+    throw new ServerError(0, "Couldn't reach the team AI server. Check your connection.");
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data) throw new ServerError(res.status || 502, 'The team AI server returned an unexpected response.');
+  if (!data.ok) throw new ServerError(data.status || 400, data.error || 'The team AI server reported an error.');
+  return data.data;
+}
+
+function callServer(cfg, action, content) {
+  return serverRequest(cfg.serverUrl, { action, teamCode: cfg.teamCode, content });
 }
 
 // ---- Google Gemini ----
@@ -202,6 +228,13 @@ function cleanList(items, terms) {
 
 // Maps SDK error classes to plain-language messages for colleagues.
 export function friendlyError(err) {
+  if (err && err.provider === 'server') {
+    if (err.status === 401) return 'The team code was not accepted. Ask your admin for a new invite link.';
+    if (err.status === 429) return 'The team AI server is busy. Try again in a minute.';
+    if (err.status === 413) return 'This note is too long for the AI assistant. The on-device edit is used.';
+    if (err.status === 0) return err.message;
+    return `${err.message} The on-device edit is used.`;
+  }
   if (err && err.provider === 'gemini') {
     if (err.status === 400 && /api key|API_KEY/i.test(err.message)) return 'Google did not accept this Gemini key. Create a new key and paste it again in Settings.';
     if (err.status === 401 || err.status === 403) return 'Google did not accept this Gemini key. Check it in Settings.';
@@ -230,7 +263,9 @@ export async function analyseNote(cfg, { transcript, known }) {
     ? known.map(p => `- ${p.name}${p.code ? ` (code ${p.code})` : ''}${p.glossary?.length ? `; key terms: ${p.glossary.join(', ')}` : ''}`).join('\n')
     : '- none yet';
   const content = `Known projects:\n${list}\n\n<transcript>\n${transcript}\n</transcript>`;
-  const out = await callClaude(cfg, NOTE_SYSTEM, content, NOTE_SCHEMA, 'high');
+  const out = cfg.mode === 'server'
+    ? await callServer(cfg, 'analyseNote', content)
+    : await callClaude(cfg, NOTE_SYSTEM, content, NOTE_SCHEMA, 'high');
   const projects = (out.projects || []).map(p => ({
     name: stripDashes(applyGlossary(String(p.project_name || 'General').trim(), terms)) || 'General',
     sections: {
@@ -260,7 +295,9 @@ export async function editWeek(cfg, blocks) {
     support: b.sections.support
   }));
   const content = `Key terms to spell exactly: ${[...new Set(terms)].join(', ') || 'none'}\n\n<draft_report>\n${JSON.stringify(input, null, 1)}\n</draft_report>`;
-  const out = await callClaude(cfg, WEEK_SYSTEM, content, WEEK_SCHEMA);
+  const out = cfg.mode === 'server'
+    ? await callServer(cfg, 'polishWeek', content)
+    : await callClaude(cfg, WEEK_SYSTEM, content, WEEK_SCHEMA);
   const result = {};
   for (const p of out.projects || []) {
     result[p.project_id] = {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://*.workers.dev https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://generativelanguage.googleapis.com https://api.anthropic.com https://*.workers.dev https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#1F3A5F">
   <meta name="description" content="Record voice notes and receive an automatically generated weekly report.">
@@ -251,11 +251,17 @@
         <div id="ai-fields" hidden>
           <label class="field">Service
             <select id="ai-mode">
-              <option value="gemini">Google Gemini (free with your Google account)</option>
+              <option value="server">Team server (recommended: no key on your phone)</option>
+              <option value="gemini">Google Gemini (your own free key)</option>
               <option value="proxy">Team proxy (set up by your organisation)</option>
               <option value="key">Anthropic Claude (personal API key)</option>
             </select>
           </label>
+          <div data-ai="server" hidden>
+            <p class="fine">Your organisation runs the AI server. Open the invite link from your admin to connect automatically, or enter the details below.</p>
+            <label class="field">Team server URL <input id="ai-server" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/.../exec"></label>
+            <label class="field">Team code <input id="ai-team" type="password" autocomplete="off" spellcheck="false"></label>
+          </div>
           <div data-ai="gemini">
             <ol class="steps">
               <li><a class="btn secondary block" id="gemini-get" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">1. Get your free Gemini key</a>
@@ -282,7 +288,7 @@
         <div class="fine" id="storage-info"></div>
         <button class="btn danger block" id="set-wipe">Delete all data on this device</button>
       </div>
-      <p class="fine center">Voice Weekly Report v<span id="app-version"></span></p>
+      <p class="fine center">Voice Weekly Report v<span id="app-version"></span> · <a href="admin.html">Team admin</a></p>
     </section>
 
     <!-- Guidelines -->

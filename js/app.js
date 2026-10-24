@@ -9,7 +9,7 @@ import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.5.2';
+const APP_VERSION = '1.6.0';
 // Bump when the on-device editing rules change, so older notes are re-edited.
 const RULES_VERSION = 8;
 const AUDIO_RETENTION_DAYS = 90;
@@ -49,7 +49,11 @@ async function loadState() {
   try {
     const aiRec = await db.get('settings', 'ai');
     if (aiRec) state.ai = { ...state.ai, ...(await decryptJSON(aiRec)) };
-  } catch { /* keep defaults */ }
+  } catch (err) {
+    // Surface the problem instead of silently showing an empty connection.
+    console.error(err);
+    state.aiLoadError = true;
+  }
   const raw = (await db.getAll('notes')) || [];
   state.notes = [];
   for (const n of raw) state.notes.push(await decryptNote(n));
@@ -58,7 +62,15 @@ async function loadState() {
 
 const saveSettings = () => db.put('settings', state.settings, 'app');
 // AI editor credentials are encrypted with the device key.
-const saveAi = async () => db.put('settings', await encryptJSON(state.ai), 'ai');
+// Saves the AI connection and reads it back, so a write that the browser
+// dropped is reported instead of silently lost.
+async function saveAi() {
+  const snapshot = JSON.stringify(state.ai);
+  await db.put('settings', await encryptJSON(state.ai), 'ai');
+  const check = await db.get('settings', 'ai');
+  if (!check || JSON.stringify(await decryptJSON(check)) !== snapshot) throw new Error('The connection could not be saved on this device.');
+  state.aiLoadError = false;
+}
 
 async function decryptNote(record) {
   let payload = { segments: [], transcript: '', sections: null };
@@ -912,8 +924,8 @@ function wire() {
     }
     if (e.target.id === 'ai-banner-go') {
       state.ai.enabled = true;
-      state.ai.mode = 'gemini';
-      await saveAi();
+      if (!state.ai.mode) state.ai.mode = 'gemini';
+      await saveAi().catch(err => console.error(err));
       await show('settings');
       $('#ai-card').scrollIntoView({ block: 'start' });
     }
@@ -1072,22 +1084,29 @@ function wire() {
       enabled: $('#ai-enabled').checked,
       mode: $('#ai-mode').value,
       geminiKey: $('#ai-gemini').value.trim(),
+      serverUrl: $('#ai-server').value.trim(),
+      teamCode: $('#ai-team').value.trim(),
       proxyUrl: $('#ai-proxy').value.trim(),
       accessCode: $('#ai-code').value.trim(),
       apiKey: $('#ai-key').value.trim()
     };
-    saveAi();
     renderAiSettings();
+    return saveAi().then(() => true, err => {
+      console.error(err);
+      $('#ai-status').textContent = 'Your settings could not be saved on this device. Close and reopen the app, then try again.';
+      return false;
+    });
   };
-  ['#ai-enabled', '#ai-mode', '#ai-gemini', '#ai-proxy', '#ai-code', '#ai-key'].forEach(sel => { $(sel).onchange = readAi; });
+  ['#ai-enabled', '#ai-mode', '#ai-gemini', '#ai-server', '#ai-team', '#ai-proxy', '#ai-code', '#ai-key'].forEach(sel => { $(sel).onchange = readAi; });
   const testAi = async () => {
-    readAi();
+    const saved = await readAi();
+    if (!saved) return;
     if (!ai.isConfigured(state.ai)) { $('#ai-status').textContent = 'Turn the editor on and complete the connection details first.'; return; }
     $('#ai-test').disabled = true;
     $('#ai-status').textContent = 'Testing the AI editor...';
     try {
       await ai.testConnection(state.ai);
-      $('#ai-status').textContent = 'Connected. New notes will be edited automatically.';
+      $('#ai-status').textContent = 'Connected and saved on this device. New notes will be edited automatically.';
     } catch (err) {
       console.error(err);
       $('#ai-status').textContent = ai.friendlyError(err);
@@ -1238,15 +1257,20 @@ async function shareReport() {
 
 function renderAiSettings() {
   const c = state.ai;
+  if (state.aiLoadError) $('#ai-status').textContent = 'Your saved AI connection could not be read on this device. Please connect again.';
   $('#ai-enabled').checked = !!c.enabled;
   $('#ai-mode').value = c.mode || 'gemini';
   $('#ai-gemini').value = c.geminiKey || '';
+  $('#ai-server').value = c.serverUrl || '';
+  $('#ai-team').value = c.teamCode || '';
   $('#ai-proxy').value = c.proxyUrl || '';
   $('#ai-code').value = c.accessCode || '';
   $('#ai-key').value = c.apiKey || '';
   $('#ai-fields').hidden = !c.enabled;
   document.querySelectorAll('[data-ai]').forEach(el => { el.hidden = el.dataset.ai !== (c.mode || 'gemini'); });
-  $('#ai-privacy').textContent = (c.mode || 'gemini') === 'gemini'
+  $('#ai-privacy').textContent = c.mode === 'server'
+    ? "Privacy: only transcript text is sent, to your organisation's AI server and on to Google Gemini; audio never leaves this device. No API key is stored on this phone. The team code is stored encrypted on this device."
+    : (c.mode || 'gemini') === 'gemini'
     ? 'Privacy: only transcript text is sent to Google; audio never leaves this device. On the free Gemini tier, Google may use submitted text to improve its products and human reviewers may read it, so avoid confidential details or use a paid (billing-enabled) key. Your key is stored encrypted on this device.'
     : 'Privacy: only transcript text is sent to Anthropic; audio never leaves this device. Connection details are stored encrypted on this device.';
 }
@@ -1289,6 +1313,29 @@ async function polishReport() {
   RENDER.report();
 }
 
+/* ---------- Team invite links ---------- */
+
+// An admin shares https://<app>/#join=<code>. The part after # never leaves
+// the device, so the team code is not sent to any web server.
+async function acceptInvite() {
+  const m = location.hash.match(/^#join=([A-Za-z0-9_-]+)$/);
+  if (!m) return;
+  history.replaceState(history.state, '', location.pathname + location.search);
+  try {
+    const json = new TextDecoder().decode(Uint8Array.from(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)));
+    const invite = JSON.parse(json);
+    if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(invite.s) || !invite.c) throw new Error('Invalid invite');
+    state.ai = { ...state.ai, enabled: true, mode: 'server', serverUrl: invite.s, teamCode: String(invite.c) };
+    await saveAi();
+    state.settings.aiPromptDismissed = true;
+    await saveSettings();
+    setTimeout(() => toast("Connected to your team's AI assistant."), 800);
+  } catch (err) {
+    console.error(err);
+    setTimeout(() => toast('This invite link is not valid. Ask your admin for a new one.', 4000), 800);
+  }
+}
+
 /* ---------- Boot ---------- */
 
 async function boot() {
@@ -1312,6 +1359,11 @@ async function boot() {
     n.title = predictTitle(n.transcript, n.sections);
     await saveNote(n).catch(() => {});
   }
+
+  await acceptInvite();
+
+  // Ask the browser not to clear this app's data under storage pressure.
+  try { if (navigator.storage?.persisted && !(await navigator.storage.persisted())) await navigator.storage.persist(); } catch { /* optional */ }
 
   if (!state.settings.onboarded) {
     show('onboarding', {}, { replace: true });
