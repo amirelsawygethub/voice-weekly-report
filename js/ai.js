@@ -230,7 +230,7 @@ function cleanList(items, terms) {
 export function friendlyError(err) {
   if (err && err.provider === 'server') {
     if (err.status === 401) return 'The team code was not accepted. Ask your admin for a new invite link.';
-    if (err.status === 429) return 'The team AI server is busy. Try again in a minute.';
+    if (err.status === 429 || err.status === 503) return `${err.message} The on-device edit is used.`;
     if (err.status === 413) return 'This note is too long for the AI assistant. The on-device edit is used.';
     if (err.status === 0) return err.message;
     return `${err.message} The on-device edit is used.`;

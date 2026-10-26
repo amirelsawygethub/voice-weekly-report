@@ -10,7 +10,9 @@
  *   ADMIN_TOKEN     required  the admin password for the Team admin page.
  *                             Type it in Script properties yourself; it is
  *                             never written to the log or sent back.
- *   GEMINI_MODELS   optional  comma-separated model list, newest first
+ *   GEMINI_MODELS   optional  comma-separated model list, fastest first
+ *   DAILY_LIMIT     optional  AI requests allowed per day (default 300)
+ *   AI_PAUSED       optional  "true" pauses the AI assistant for everyone
  *
  * Deploy: Deploy > New deployment > Web app; Execute as: Me;
  * Who has access: Anyone. Use the URL ending in /exec in the app.
@@ -20,7 +22,12 @@
 const DEFAULT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
 const MAX_INPUT_CHARS = 30000;
 const MAX_PROMPT_CHARS = 8000;     // script property values are limited to 9 KB
-const RATE_LIMIT_PER_MINUTE = 120;
+// Abuse limits: the team link may be forwarded, so cap how much anyone can
+// use the organisation's Gemini key. Admins can change the daily limit,
+// pause the assistant or issue a new team link from the admin page.
+const RATE_LIMIT_PER_MINUTE = 30;
+const DEFAULT_DAILY_LIMIT = 300;
+const AI_ACTIONS = { analyseNote: true, polishWeek: true };
 const ADMIN_MAX_FAILURES = 5;      // wrong admin passwords allowed...
 const ADMIN_LOCKOUT_SECONDS = 900; // ...before admin sign-in is blocked for 15 minutes
 
@@ -141,6 +148,10 @@ function doPost(e) {
       return error_(401, 'Team code not accepted.');
     }
     if (!rateLimitOk_()) return error_(429, 'Too many requests. Please try again in a minute.');
+    if (AI_ACTIONS[action]) {
+      if (props.getProperty('AI_PAUSED') === 'true') return error_(503, 'The AI assistant is paused by your admin.');
+      if (!dailyQuotaOk_(props)) return error_(429, "Today's AI limit for the team has been reached. It resets tomorrow.");
+    }
 
     switch (action) {
       case 'ping':
@@ -155,6 +166,19 @@ function doPost(e) {
         return ok_(adminSetPrompts_(props, req));
       case 'adminRestorePrevious':
         return ok_(adminRestorePrevious_(props));
+      case 'adminSetPaused':
+        props.setProperty('AI_PAUSED', req.paused ? 'true' : 'false');
+        return ok_(adminConfig_(props));
+      case 'adminSetDailyLimit': {
+        const n = Math.round(Number(req.limit));
+        if (!(n >= 10 && n <= 5000)) return error_(400, 'The daily limit must be between 10 and 5000.');
+        props.setProperty('DAILY_LIMIT', String(n));
+        return ok_(adminConfig_(props));
+      }
+      case 'adminRotateTeamCode':
+        // Old invite links stop working immediately.
+        props.setProperty('TEAM_CODE', randomToken_(10));
+        return ok_(adminConfig_(props));
       case 'adminTest':
         return generated_(generate_(validPrompt_(req.notePrompt) || getPrompt_('NOTE_PROMPT', DEFAULT_NOTE_PROMPT), limit_(req.content), NOTE_SCHEMA), true);
       default:
@@ -262,6 +286,9 @@ function adminConfig_(props) {
     updatedBy: props.getProperty('PROMPTS_UPDATED_BY') || '',
     teamCode: props.getProperty('TEAM_CODE') || '',
     hasGeminiKey: !!props.getProperty('GEMINI_API_KEY'),
+    paused: props.getProperty('AI_PAUSED') === 'true',
+    dailyLimit: dailyLimit_(props),
+    usedToday: props.getProperty('USAGE_DAY') === today_() ? Number(props.getProperty('USAGE_COUNT') || 0) : 0,
     models: props.getProperty('GEMINI_MODELS') || DEFAULT_MODELS.join(', ')
   };
 }
@@ -349,6 +376,30 @@ function recordAdminFailure_() {
   const cache = CacheService.getScriptCache();
   const n = Number(cache.get('admin-failures') || 0) + 1;
   cache.put('admin-failures', String(n), ADMIN_LOCKOUT_SECONDS);
+}
+
+function today_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function dailyLimit_(props) {
+  const n = Number(props.getProperty('DAILY_LIMIT'));
+  return n >= 10 ? n : DEFAULT_DAILY_LIMIT;
+}
+
+// Counts AI requests per day in script properties (reliable, unlike the cache).
+function dailyQuotaOk_(props) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(5000);
+  try {
+    const day = today_();
+    const used = props.getProperty('USAGE_DAY') === day ? Number(props.getProperty('USAGE_COUNT') || 0) : 0;
+    if (used >= dailyLimit_(props)) return false;
+    props.setProperties({ USAGE_DAY: day, USAGE_COUNT: String(used + 1) });
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function rateLimitOk_() {

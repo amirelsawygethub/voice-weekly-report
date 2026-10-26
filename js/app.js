@@ -9,7 +9,7 @@ import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.6.3';
+const APP_VERSION = '1.6.4';
 // Bump when the on-device editing rules change, so older notes are re-edited.
 const RULES_VERSION = 8;
 const AUDIO_RETENTION_DAYS = 90;

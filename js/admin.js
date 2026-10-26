@@ -47,6 +47,9 @@ function render() {
     `<li>Models: ${esc(c.models)}</li>`,
     `<li>Prompts last changed: ${esc(when)}${c.updatedBy ? ` by ${esc(c.updatedBy)}` : ''}</li>`
   ].join('');
+  $('#adm-usage').textContent = `${c.usedToday || 0} of ${c.dailyLimit} AI requests used today. ${c.paused ? 'The AI assistant is PAUSED: colleagues get the on-device edit only.' : 'The AI assistant is on.'}`;
+  $('#adm-limit').value = c.dailyLimit;
+  $('#adm-pause').textContent = c.paused ? 'Resume the AI assistant for everyone' : 'Pause the AI assistant for everyone';
   $('#adm-note').value = c.notePrompt;
   $('#adm-week').value = c.weekPrompt;
   $('#adm-invite').value = c.teamCode ? inviteLink(creds.url, c.teamCode) : 'Set TEAM_CODE on the server first (run setupTokens).';
@@ -150,6 +153,19 @@ function wire() {
       $('#adm-save-status').textContent = err.message;
     }
     $('#adm-save').disabled = false;
+  };
+  $('#adm-limit-save').onclick = async () => {
+    try { config = await call('adminSetDailyLimit', { limit: Number($('#adm-limit').value) }); render(); toast('Daily limit saved.'); }
+    catch (err) { toast(err.message, 4000); }
+  };
+  $('#adm-pause').onclick = async () => {
+    try { config = await call('adminSetPaused', { paused: !config.paused }); render(); toast(config.paused ? 'AI assistant paused for everyone.' : 'AI assistant resumed.'); }
+    catch (err) { toast(err.message, 4000); }
+  };
+  $('#adm-rotate').onclick = async () => {
+    if (!confirm('Create a new team link? Everyone will need the new link to keep using the AI assistant.')) return;
+    try { config = await call('adminRotateTeamCode'); render(); toast('New team link created. Send it to your colleagues.'); }
+    catch (err) { toast(err.message, 4000); }
   };
   $('#adm-restore').onclick = async () => {
     if (!confirm('Restore the previous prompts for everyone?')) return;

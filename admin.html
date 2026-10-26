@@ -49,6 +49,18 @@
       </div>
 
       <div class="card">
+        <h3>Usage and safety</h3>
+        <p class="muted" id="adm-usage"></p>
+        <label class="field">Daily limit (AI requests per day for the whole team)
+          <input id="adm-limit" type="number" min="10" max="5000" step="10" inputmode="numeric">
+        </label>
+        <div class="stack">
+          <button class="btn secondary block" id="adm-limit-save">Save daily limit</button>
+          <button class="btn secondary block" id="adm-pause"></button>
+        </div>
+      </div>
+
+      <div class="card">
         <h3>Invite colleagues</h3>
         <p class="muted">Send this link. Opening it on a phone connects the app to the team server automatically. No API key is shared.</p>
         <input id="adm-invite" readonly>
@@ -56,6 +68,7 @@
           <button class="btn secondary grow" id="adm-copy">Copy link</button>
           <button class="btn secondary grow" id="adm-share">Share</button>
         </div>
+        <button class="btn danger block" id="adm-rotate" style="margin-top:10px">Create new team link (old link stops working)</button>
       </div>
 
       <div class="card">
