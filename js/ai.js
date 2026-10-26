@@ -1,65 +1,11 @@
-// Optional AI business-writing editor. Works with Google Gemini (a free key
-// created with the user's Google account) or Claude (Anthropic SDK, through a
-// team proxy or a personal key). Only transcript text is sent; audio never
-// leaves the device. The editor
-// keeps the speaker's meaning, removes noise, makes incoherent passages
-// coherent and condenses everything into report bullets.
+// Optional AI writing assistant using Google Gemini with the user's own free
+// API key (created with their Google account). Requests go straight from the
+// phone to Google: no server of ours is involved. Only transcript text is
+// sent; audio never leaves the device.
 import { applyGlossary, stripDashes } from './summarize.js';
 
-const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.130.0/+esm';
-export const AI_MODEL = 'claude-opus-5-5';
-
-let sdkPromise;
-let sdk = null;
-
-async function getClient(cfg) {
-  if (!sdkPromise) sdkPromise = import(SDK_URL);
-  const { default: Anthropic } = await sdkPromise;
-  sdk = Anthropic;
-  if (cfg.mode === 'proxy') {
-    // The team proxy holds the real API key; the browser never sees it.
-    return new Anthropic({
-      apiKey: 'team-proxy',
-      baseURL: cfg.proxyUrl.replace(/\/+$/, ''),
-      dangerouslyAllowBrowser: true,
-      defaultHeaders: { 'x-team-code': cfg.accessCode || '' },
-      timeout: 120000,
-      maxRetries: 2
-    });
-  }
-  return new Anthropic({ apiKey: cfg.apiKey, dangerouslyAllowBrowser: true, timeout: 120000, maxRetries: 2 });
-}
-
 export function isConfigured(cfg) {
-  if (!cfg || !cfg.enabled) return false;
-  if (cfg.mode === 'server') return !!cfg.serverUrl && !!cfg.teamCode;
-  if (cfg.mode === 'gemini') return !!cfg.geminiKey;
-  return cfg.mode === 'proxy' ? !!cfg.proxyUrl : !!cfg.apiKey;
-}
-
-// ---- Team server (Google Apps Script) ----
-// The organisation's Gemini key and the AI prompts live on the server, so no
-// API key is stored on phones or sent from them. Requests are text/plain JSON
-// so browsers send them without a CORS preflight.
-class ServerError extends Error {
-  constructor(status, message) { super(message); this.status = status; this.provider = 'server'; }
-}
-
-export async function serverRequest(url, body) {
-  let res;
-  try {
-    res = await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), redirect: 'follow' });
-  } catch {
-    throw new ServerError(0, "Couldn't reach the team AI server. Check your connection.");
-  }
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data) throw new ServerError(res.status || 502, 'The team AI server returned an unexpected response.');
-  if (!data.ok) throw new ServerError(data.status || 400, data.error || 'The team AI server reported an error.');
-  return data.data;
-}
-
-function callServer(cfg, action, content) {
-  return serverRequest(cfg.serverUrl, { action, teamCode: cfg.teamCode, content });
+  return !!(cfg && cfg.enabled && cfg.mode === 'gemini' && cfg.geminiKey);
 }
 
 // ---- Google Gemini ----
@@ -201,22 +147,8 @@ const WEEK_SCHEMA = {
   additionalProperties: false
 };
 
-async function callClaude(cfg, system, userContent, schema, effort = 'medium') {
-  if (cfg.mode === 'gemini') return callGemini(cfg, system, userContent, schema);
-  const client = await getClient(cfg);
-  const response = await client.beta.messages.create({
-    model: AI_MODEL,
-    max_tokens: 16000,
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    output_config: { effort, format: { type: 'json_schema', schema } },
-    system,
-    messages: [{ role: 'user', content: userContent }]
-  });
-  if (response.stop_reason === 'refusal') throw new Error('The AI editor declined this text. The standard on-device edit is used instead.');
-  if (response.stop_reason === 'max_tokens') throw new Error('The AI editor response was incomplete. The standard on-device edit is used instead.');
-  const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
-  return JSON.parse(text);
+function callModel(cfg, system, userContent, schema) {
+  return callGemini(cfg, system, userContent, schema);
 }
 
 function cleanList(items, terms) {
@@ -226,33 +158,18 @@ function cleanList(items, terms) {
     .map(s => (/[.?!]$/.test(s) ? s : s + '.'));
 }
 
-// Maps SDK error classes to plain-language messages for colleagues.
+// Plain-language messages for errors.
 export function friendlyError(err) {
-  if (err && err.provider === 'server') {
-    if (err.status === 401) return 'The team code was not accepted. Ask your admin for a new invite link.';
-    if (err.status === 429 || err.status === 503) return `${err.message} The on-device edit is used.`;
-    if (err.status === 413) return 'This note is too long for the AI assistant. The on-device edit is used.';
-    if (err.status === 0) return err.message;
-    return `${err.message} The on-device edit is used.`;
-  }
   if (err && err.provider === 'gemini') {
     if (err.status === 400 && /api key|API_KEY/i.test(err.message)) return 'Google did not accept this Gemini key. Create a new key and paste it again in Settings.';
     if (err.status === 401 || err.status === 403) return 'Google did not accept this Gemini key. Check it in Settings.';
-    if (err.status === 429) return 'Gemini free-tier limit reached for now. The standard on-device edit is used; try again later.';
-    if (err.status >= 500) return 'Gemini is temporarily unavailable. The standard on-device edit is used.';
+    if (err.status === 429) return 'Gemini free-tier limit reached for now. The on-device edit is used; try again later.';
+    if (err.status >= 500) return 'Gemini is temporarily unavailable. The on-device edit is used.';
     return err.message;
   }
-  if (err instanceof TypeError) return 'No connection to the AI editor. The standard on-device edit is used.';
-  const A = sdk;
-  if (A) {
-    if (err instanceof A.AuthenticationError || err instanceof A.PermissionDeniedError) return 'The AI editor rejected the credentials. Check the team access code or API key in Settings.';
-    if (err instanceof A.RateLimitError) return 'The AI editor is busy right now. Try Edit with AI editor again shortly.';
-    if (err instanceof A.InternalServerError) return 'The AI editor is temporarily unavailable. The standard on-device edit is used.';
-    if (err instanceof A.APIConnectionError) return 'No connection to the AI editor. The standard on-device edit is used.';
-    if (err instanceof A.APIError) return `The AI editor returned an error (${err.status}). The standard on-device edit is used.`;
-  }
-  if (err instanceof SyntaxError) return 'The AI editor returned an unreadable response. The standard on-device edit is used.';
-  return (err && err.message) || 'The AI editor failed. The standard on-device edit is used.';
+  if (err instanceof TypeError) return 'No connection to Gemini. The on-device edit is used.';
+  if (err instanceof SyntaxError) return 'Gemini returned an unreadable response. The on-device edit is used.';
+  return (err && err.message) || 'The AI assistant failed. The on-device edit is used.';
 }
 
 // Analyses one note: detects the project(s) and extracts the four sections
@@ -263,9 +180,7 @@ export async function analyseNote(cfg, { transcript, known }) {
     ? known.map(p => `- ${p.name}${p.code ? ` (code ${p.code})` : ''}${p.glossary?.length ? `; key terms: ${p.glossary.join(', ')}` : ''}`).join('\n')
     : '- none yet';
   const content = `Known projects:\n${list}\n\n<transcript>\n${transcript}\n</transcript>`;
-  const out = cfg.mode === 'server'
-    ? await callServer(cfg, 'analyseNote', content)
-    : await callClaude(cfg, NOTE_SYSTEM, content, NOTE_SCHEMA, 'high');
+  const out = await callModel(cfg, NOTE_SYSTEM, content, NOTE_SCHEMA);
   const projects = (out.projects || []).map(p => ({
     name: stripDashes(applyGlossary(String(p.project_name || 'General').trim(), terms)) || 'General',
     sections: {
@@ -295,9 +210,7 @@ export async function editWeek(cfg, blocks) {
     support: b.sections.support
   }));
   const content = `Key terms to spell exactly: ${[...new Set(terms)].join(', ') || 'none'}\n\n<draft_report>\n${JSON.stringify(input, null, 1)}\n</draft_report>`;
-  const out = cfg.mode === 'server'
-    ? await callServer(cfg, 'polishWeek', content)
-    : await callClaude(cfg, WEEK_SYSTEM, content, WEEK_SCHEMA);
+  const out = await callModel(cfg, WEEK_SYSTEM, content, WEEK_SCHEMA);
   const result = {};
   for (const p of out.projects || []) {
     result[p.project_id] = {

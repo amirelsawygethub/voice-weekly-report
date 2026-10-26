@@ -1,11 +1,10 @@
 // Service worker: makes the app installable and usable offline.
 // Network-first for app files so updates arrive promptly; cache fallback offline.
-const VERSION = 'v1.6.4';
+const VERSION = 'v2.0.0';
 const CACHE = `vwr-shell-${VERSION}`;
 const SHELL = [
   './',
   './index.html',
-  './admin.html',
   './styles.css',
   './manifest.webmanifest',
   './worker.js',
@@ -21,7 +20,8 @@ const SHELL = [
   './js/ai.js',
   './js/coach.js',
   './js/extract.js',
-  './js/admin.js',
+  './vendor/transformers/transformers.min.js',
+  './vendor/transformers/ort-wasm-simd-threaded.jsep.mjs',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
@@ -35,7 +35,8 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k.startsWith('vwr-shell-') && k !== CACHE).map(k => caches.delete(k))))
+      // Old app versions and the retired CDN cache are removed.
+      .then(keys => Promise.all(keys.filter(k => (k.startsWith('vwr-shell-') && k !== CACHE) || k === 'vwr-cdn').map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -58,18 +59,5 @@ self.addEventListener('fetch', event => {
         .catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('./index.html')))
     );
     return;
-  }
-
-  // Transformers.js library files from the CDN: cache first (versioned URLs).
-  if (url.hostname === 'cdn.jsdelivr.net') {
-    event.respondWith(
-      caches.open('vwr-cdn').then(async c => {
-        const hit = await c.match(req);
-        if (hit) return hit;
-        const res = await fetch(req);
-        if (res.ok) c.put(req, res.clone());
-        return res;
-      })
-    );
   }
 });

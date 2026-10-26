@@ -1,9 +1,13 @@
 // Speech-to-text worker. Runs OpenAI Whisper (ONNX build) locally via
 // Transformers.js and WebAssembly. Model files are cached by the browser.
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1';
+// The library is hosted inside the app (vendor/transformers, verified copy of
+// the npm package), so no code is loaded from a CDN at runtime.
+import { pipeline, env } from './vendor/transformers/transformers.min.js';
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
+// Load the ONNX runtime (.mjs and .wasm) from the app, not from jsDelivr.
+env.backends.onnx.wasm.wasmPaths = new URL('./vendor/transformers/', import.meta.url).href;
 
 let asr = null;
 let currentModel = null;

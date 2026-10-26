@@ -9,7 +9,7 @@ import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.6.4';
+const APP_VERSION = '2.0.0';
 // Bump when the on-device editing rules change, so older notes are re-edited.
 const RULES_VERSION = 8;
 const AUDIO_RETENTION_DAYS = 90;
@@ -29,7 +29,7 @@ const state = {
   processAgain: false,
   model: { pct: 0, active: false, ready: false, error: '' },
   installPrompt: null,
-  ai: { enabled: false, mode: 'gemini', geminiKey: '', proxyUrl: '', accessCode: '', apiKey: '' }
+  ai: { enabled: false, mode: 'gemini', geminiKey: '' }
 };
 
 const DEFAULT_SETTINGS = {
@@ -48,7 +48,17 @@ async function loadState() {
   state.projects = ((await db.getAll('projects')) || []).sort((a, b) => a.createdAt - b.createdAt);
   try {
     const aiRec = await db.get('settings', 'ai');
-    if (aiRec) state.ai = { ...state.ai, ...(await decryptJSON(aiRec)) };
+    if (aiRec) {
+      const saved = await decryptJSON(aiRec);
+      // The team server and Claude options were removed: anyone using them
+      // falls back to the on-device edit and can connect their own Gemini key.
+      if (saved.mode && saved.mode !== 'gemini') {
+        state.ai = { enabled: false, mode: 'gemini', geminiKey: '' };
+        state.aiMigrated = true;
+      } else {
+        state.ai = { enabled: !!saved.enabled, mode: 'gemini', geminiKey: saved.geminiKey || '' };
+      }
+    }
   } catch (err) {
     // Surface the problem instead of silently showing an empty connection.
     console.error(err);
@@ -266,7 +276,7 @@ const RENDER = {
 
     const ab = $('#ai-banner');
     ab.hidden = ai.isConfigured(state.ai) || !!state.settings.aiPromptDismissed;
-    ab.innerHTML = '<span>Turn on the AI writing assistant: copy the invite link your team sent you, then tap <strong>Paste invite link</strong>.</span><span class="row gap"><button class="btn primary" id="ai-banner-paste">Paste invite link</button><button class="btn ghost" id="ai-banner-x" aria-label="Dismiss">Later</button></span>';
+    ab.innerHTML = '<span>Optional: get sharper wording with your own free Google Gemini key (about 1 minute).</span><span class="row gap"><button class="btn primary" id="ai-banner-go">Connect</button><button class="btn ghost" id="ai-banner-x" aria-label="Dismiss">Later</button></span>';
     const rb = $('#reminder-banner');
     rb.hidden = !isReminderDue(state.settings.reminderTime, notes.length);
     rb.innerHTML = 'Your weekly report is due today. Please record your notes. <button class="btn primary" data-go="record">Record</button>';
@@ -321,7 +331,7 @@ const RENDER = {
     const aiOn = ai.isConfigured(state.ai);
     $('#note-editor').innerHTML = !done ? '' : note.editor === 'ai'
       ? '<span class="badge ai">AI edited</span><span>Wording refined by the AI writing assistant.</span>'
-      : `<span class="badge">On-device edit</span>${note.aiError ? `<span>${esc(note.aiError)}</span>` : ''}${aiOn ? '' : '<button class="link-btn" id="ai-banner-paste">Paste your team invite link for sharper wording</button>'}`;
+      : `<span class="badge">On-device edit</span>${note.aiError ? `<span>${esc(note.aiError)}</span>` : ''}${aiOn ? '' : '<button class="link-btn" id="ai-banner-go">Connect your own free Gemini key for sharper wording</button>'}`;
     $('#note-ai').hidden = !(done && note.editor !== 'ai' && aiOn);
 
     const tips = done ? coach(note, state.projects) : [];
@@ -922,10 +932,9 @@ function wire() {
       state.installPrompt = null;
       renderInstallBanner();
     }
-    if (e.target.id === 'ai-banner-paste' || e.target.id === 'ai-paste-invite') pasteInvite();
     if (e.target.id === 'ai-banner-go') {
       state.ai.enabled = true;
-      if (!state.ai.mode) state.ai.mode = 'gemini';
+      state.ai.mode = 'gemini';
       await saveAi().catch(err => console.error(err));
       await show('settings');
       $('#ai-card').scrollIntoView({ block: 'start' });
@@ -1083,14 +1092,10 @@ function wire() {
   const readAi = () => {
     state.ai = {
       enabled: $('#ai-enabled').checked,
-      mode: $('#ai-mode').value,
-      geminiKey: $('#ai-gemini').value.trim(),
-      serverUrl: $('#ai-server').value.trim(),
-      teamCode: $('#ai-team').value.trim(),
-      proxyUrl: $('#ai-proxy').value.trim(),
-      accessCode: $('#ai-code').value.trim(),
-      apiKey: $('#ai-key').value.trim()
+      mode: 'gemini',
+      geminiKey: $('#ai-gemini').value.trim()
     };
+    state.aiMigrated = false;
     renderAiSettings();
     return saveAi().then(() => true, err => {
       console.error(err);
@@ -1098,7 +1103,7 @@ function wire() {
       return false;
     });
   };
-  ['#ai-enabled', '#ai-mode', '#ai-gemini', '#ai-server', '#ai-team', '#ai-proxy', '#ai-code', '#ai-key'].forEach(sel => { $(sel).onchange = readAi; });
+  ['#ai-enabled', '#ai-gemini'].forEach(sel => { $(sel).onchange = readAi; });
   const testAi = async () => {
     const saved = await readAi();
     if (!saved) return;
@@ -1260,20 +1265,9 @@ function renderAiSettings() {
   const c = state.ai;
   if (state.aiLoadError) $('#ai-status').textContent = 'Your saved AI connection could not be read on this device. Please connect again.';
   $('#ai-enabled').checked = !!c.enabled;
-  $('#ai-mode').value = c.mode || 'gemini';
+  if (state.aiMigrated) $('#ai-status').textContent = 'The shared team AI service has ended. Connect your own free Gemini key below, or keep using the on-device edit.';
   $('#ai-gemini').value = c.geminiKey || '';
-  $('#ai-server').value = c.serverUrl || '';
-  $('#ai-team').value = c.teamCode || '';
-  $('#ai-proxy').value = c.proxyUrl || '';
-  $('#ai-code').value = c.accessCode || '';
-  $('#ai-key').value = c.apiKey || '';
   $('#ai-fields').hidden = !c.enabled;
-  document.querySelectorAll('[data-ai]').forEach(el => { el.hidden = el.dataset.ai !== (c.mode || 'gemini'); });
-  $('#ai-privacy').textContent = c.mode === 'server'
-    ? "Privacy: only transcript text is sent, to your organisation's AI server and on to Google Gemini; audio never leaves this device. No API key is stored on this phone. The team code is stored encrypted on this device."
-    : (c.mode || 'gemini') === 'gemini'
-    ? 'Privacy: only transcript text is sent to Google; audio never leaves this device. On the free Gemini tier, Google may use submitted text to improve its products and human reviewers may read it, so avoid confidential details or use a paid (billing-enabled) key. Your key is stored encrypted on this device.'
-    : 'Privacy: only transcript text is sent to Anthropic; audio never leaves this device. Connection details are stored encrypted on this device.';
 }
 
 function reportSignature(notes) {
@@ -1314,57 +1308,14 @@ async function polishReport() {
   RENDER.report();
 }
 
-/* ---------- Team invite links ---------- */
+/* ---------- Old team links ---------- */
 
-// An admin shares https://<app>/#join=<code>. The part after # never leaves
-// the device, so the team code is not sent to any web server.
-async function joinWithInvite(code) {
-  const json = new TextDecoder().decode(Uint8Array.from(atob(code.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)));
-  const invite = JSON.parse(json);
-  if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(invite.s) || !invite.c) throw new Error('Invalid invite');
-  state.ai = { ...state.ai, enabled: true, mode: 'server', serverUrl: invite.s, teamCode: String(invite.c) };
-  await saveAi();
-  state.settings.aiPromptDismissed = true;
-  await saveSettings();
-}
-
-async function acceptInvite() {
-  const m = location.hash.match(/^#join=([A-Za-z0-9_-]+)$/);
-  if (!m) return;
+// Team invite links (#join=...) belonged to the shared team AI service, which
+// has been retired. Strip them and explain, so nothing is stored from them.
+function retireOldInvite() {
+  if (!/^#join=/.test(location.hash)) return;
   history.replaceState(history.state, '', location.pathname + location.search);
-  try {
-    await joinWithInvite(m[1]);
-    setTimeout(() => toast("Connected to your team's AI assistant."), 800);
-  } catch (err) {
-    console.error(err);
-    setTimeout(() => toast('This invite link is not valid. Ask your admin for a new one.', 4000), 800);
-  }
-}
-
-// On iPhone, links open in Safari, whose data is separate from the app on the
-// Home Screen. So users copy the invite link and paste it inside the app.
-async function pasteInvite() {
-  let text = '';
-  try { text = await navigator.clipboard.readText(); } catch { /* clipboard blocked: ask instead */ }
-  let m = String(text).match(/#join=([A-Za-z0-9_-]+)/);
-  if (!m) {
-    const ok = await dialog({
-      title: 'Paste your invite link',
-      body: '<p class="muted">Copy the invite link your team sent you (press and hold it in WhatsApp or email, then tap Copy), and paste it here.</p><label class="field">Invite link <input id="invite-text" autocomplete="off" spellcheck="false" placeholder="https://amirelsawygethub.github.io/voice-weekly-report/#join=..."></label>',
-      ok: 'Connect'
-    });
-    if (!ok) return;
-    m = $('#invite-text').value.match(/#join=([A-Za-z0-9_-]+)/);
-  }
-  if (!m) { toast('That is not an invite link. Ask your team for the link.', 4000); return; }
-  try {
-    await joinWithInvite(m[1]);
-    toast("Connected to your team's AI assistant.");
-    if (state.view) RENDER[state.view]?.(state.viewOpts);
-  } catch (err) {
-    console.error(err);
-    toast('This invite link is not valid. Ask your team for a new one.', 4000);
-  }
+  setTimeout(() => toast('Team links are no longer used. Optional: connect your own free Gemini key in Settings.', 5000), 800);
 }
 
 /* ---------- Boot ---------- */
@@ -1391,7 +1342,8 @@ async function boot() {
     await saveNote(n).catch(() => {});
   }
 
-  await acceptInvite();
+  retireOldInvite();
+  if (state.aiMigrated) await saveAi().catch(() => {});
 
   // Ask the browser not to clear this app's data under storage pressure.
   try { if (navigator.storage?.persisted && !(await navigator.storage.persisted())) await navigator.storage.persist(); } catch { /* optional */ }

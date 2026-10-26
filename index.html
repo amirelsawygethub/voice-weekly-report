@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://script.googleusercontent.com https://generativelanguage.googleapis.com https://api.anthropic.com https://*.workers.dev https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://generativelanguage.googleapis.com https://huggingface.co https://*.huggingface.co https://*.hf.co; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#1F3A5F">
   <meta name="description" content="Record voice notes and receive an automatically generated weekly report.">
@@ -245,51 +245,32 @@
         <button class="btn secondary block" id="set-model-load">Download model now</button>
       </div>
       <div class="card">
-        <h3 id="ai-card">AI writing assistant</h3>
-        <p class="muted">Optional. After transcription, AI turns each note into sharper business-formal bullets: it keeps your facts, removes filler and rewrites unclear sentences. The on-device edit is always used when the assistant is off or unavailable.</p>
-        <label class="toggle"><input type="checkbox" id="ai-enabled"> Use the AI writing assistant</label>
+        <h3 id="ai-card">AI writing assistant (optional)</h3>
+        <p class="muted">The app always edits your notes on this device. If you like, you can also connect your own free Google Gemini key for sharper wording: it keeps your facts, removes filler and rewrites unclear sentences.</p>
+        <label class="toggle"><input type="checkbox" id="ai-enabled"> Use my own Gemini key</label>
         <div id="ai-fields" hidden>
-          <label class="field">Service
-            <select id="ai-mode">
-              <option value="server">Team server (recommended: no key on your phone)</option>
-              <option value="gemini">Google Gemini (your own free key)</option>
-              <option value="proxy">Team proxy (set up by your organisation)</option>
-              <option value="key">Anthropic Claude (personal API key)</option>
-            </select>
-          </label>
-          <div data-ai="server" hidden>
-            <p class="fine">Your organisation runs the AI server. Copy the invite link your team sent you and tap the button below, or enter the details by hand.</p>
-            <button type="button" class="btn primary block" id="ai-paste-invite" style="margin-bottom:12px">Paste invite link</button>
-            <label class="field">Team server URL <input id="ai-server" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/.../exec"></label>
-            <label class="field">Team code <input id="ai-team" type="password" autocomplete="off" spellcheck="false"></label>
-          </div>
-          <div data-ai="gemini">
-            <ol class="steps">
-              <li><a class="btn secondary block" id="gemini-get" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">1. Get your free Gemini key</a>
-                <span class="fine">Sign in with your Google account, tap <strong>Create API key</strong>, then copy it.</span></li>
-              <li><button type="button" class="btn primary block" id="gemini-paste">2. Paste key and connect</button></li>
-            </ol>
-            <label class="field">Gemini API key <input id="ai-gemini" type="password" autocomplete="off" placeholder="Paste your key here" spellcheck="false"></label>
-          </div>
-          <label class="field" data-ai="proxy" hidden>Team proxy URL <input id="ai-proxy" type="url" inputmode="url" autocomplete="off" placeholder="https://weekly-report-editor.yourteam.workers.dev"></label>
-          <label class="field" data-ai="proxy" hidden>Team access code <input id="ai-code" type="password" autocomplete="off"></label>
-          <label class="field" data-ai="key" hidden>Anthropic API key <input id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-..."></label>
+          <ol class="steps">
+            <li><a class="btn secondary block" id="gemini-get" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">1. Get your free Gemini key</a>
+              <span class="fine">Sign in with your Google account, tap <strong>Create API key</strong>, then copy it.</span></li>
+            <li><button type="button" class="btn primary block" id="gemini-paste">2. Paste key and connect</button></li>
+          </ol>
+          <label class="field">Gemini API key <input id="ai-gemini" type="password" autocomplete="off" placeholder="Paste your key here" spellcheck="false"></label>
           <button class="btn secondary block" id="ai-test">Test connection</button>
-          <div class="fine" id="ai-status"></div>
         </div>
-        <p class="fine" id="ai-privacy"></p>
+        <div class="fine" id="ai-status"></div>
+        <p class="fine">Privacy: with your own key, only transcript text goes from this phone directly to Google, under your Google account and Google's terms; audio never leaves the device and no one else's server is involved. On the free tier Google may use the text to improve its products and human reviewers may read it, so avoid confidential details or use a billing-enabled key. Your key is stored encrypted on this device.</p>
       </div>
       <div class="card">
         <h3>Privacy and security</h3>
         <ul class="plain">
-          <li>Audio never leaves this device. Transcripts stay on the device unless you turn on the AI writing assistant.</li>
+          <li>Audio never leaves this device. Transcripts stay on the device unless you connect your own Gemini key.</li>
           <li>All notes are encrypted with AES-256-GCM. The key cannot be exported.</li>
           <li>Audio is deleted automatically after 90 days. Reports are kept.</li>
         </ul>
         <div class="fine" id="storage-info"></div>
         <button class="btn danger block" id="set-wipe">Delete all data on this device</button>
       </div>
-      <p class="fine center">Voice Weekly Report v<span id="app-version"></span> · <a href="admin.html">Team admin</a></p>
+      <p class="fine center">Voice Weekly Report v<span id="app-version"></span></p>
     </section>
 
     <!-- Guidelines -->
