@@ -9,7 +9,7 @@ import { weekBounds, formatRange, formatDate, weekKey, buildReport, reportToHTML
 import { buildICS, googleCalendarLink, isReminderDue } from './reminder.js';
 import * as ai from './ai.js';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.3';
 // Bump when the on-device editing rules change, so older notes are re-edited.
 const RULES_VERSION = 8;
 const AUDIO_RETENTION_DAYS = 90;
@@ -266,7 +266,7 @@ const RENDER = {
 
     const ab = $('#ai-banner');
     ab.hidden = ai.isConfigured(state.ai) || !!state.settings.aiPromptDismissed;
-    ab.innerHTML = '<span>Get sharper wording: connect Google Gemini with your Google account (about 1 minute, free).</span><span class="row gap"><button class="btn primary" id="ai-banner-go">Connect</button><button class="btn ghost" id="ai-banner-x" aria-label="Dismiss">Later</button></span>';
+    ab.innerHTML = '<span>Turn on the AI writing assistant: copy the invite link your team sent you, then tap <strong>Paste invite link</strong>.</span><span class="row gap"><button class="btn primary" id="ai-banner-paste">Paste invite link</button><button class="btn ghost" id="ai-banner-x" aria-label="Dismiss">Later</button></span>';
     const rb = $('#reminder-banner');
     rb.hidden = !isReminderDue(state.settings.reminderTime, notes.length);
     rb.innerHTML = 'Your weekly report is due today. Please record your notes. <button class="btn primary" data-go="record">Record</button>';
@@ -321,7 +321,7 @@ const RENDER = {
     const aiOn = ai.isConfigured(state.ai);
     $('#note-editor').innerHTML = !done ? '' : note.editor === 'ai'
       ? '<span class="badge ai">AI edited</span><span>Wording refined by the AI writing assistant.</span>'
-      : `<span class="badge">On-device edit</span>${note.aiError ? `<span>${esc(note.aiError)}</span>` : ''}${aiOn ? '' : '<button class="link-btn" id="ai-banner-go">Connect Google Gemini for sharper wording</button>'}`;
+      : `<span class="badge">On-device edit</span>${note.aiError ? `<span>${esc(note.aiError)}</span>` : ''}${aiOn ? '' : '<button class="link-btn" id="ai-banner-paste">Paste your team invite link for sharper wording</button>'}`;
     $('#note-ai').hidden = !(done && note.editor !== 'ai' && aiOn);
 
     const tips = done ? coach(note, state.projects) : [];
@@ -922,6 +922,7 @@ function wire() {
       state.installPrompt = null;
       renderInstallBanner();
     }
+    if (e.target.id === 'ai-banner-paste' || e.target.id === 'ai-paste-invite') pasteInvite();
     if (e.target.id === 'ai-banner-go') {
       state.ai.enabled = true;
       if (!state.ai.mode) state.ai.mode = 'gemini';
@@ -1317,22 +1318,52 @@ async function polishReport() {
 
 // An admin shares https://<app>/#join=<code>. The part after # never leaves
 // the device, so the team code is not sent to any web server.
+async function joinWithInvite(code) {
+  const json = new TextDecoder().decode(Uint8Array.from(atob(code.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)));
+  const invite = JSON.parse(json);
+  if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(invite.s) || !invite.c) throw new Error('Invalid invite');
+  state.ai = { ...state.ai, enabled: true, mode: 'server', serverUrl: invite.s, teamCode: String(invite.c) };
+  await saveAi();
+  state.settings.aiPromptDismissed = true;
+  await saveSettings();
+}
+
 async function acceptInvite() {
   const m = location.hash.match(/^#join=([A-Za-z0-9_-]+)$/);
   if (!m) return;
   history.replaceState(history.state, '', location.pathname + location.search);
   try {
-    const json = new TextDecoder().decode(Uint8Array.from(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)));
-    const invite = JSON.parse(json);
-    if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(invite.s) || !invite.c) throw new Error('Invalid invite');
-    state.ai = { ...state.ai, enabled: true, mode: 'server', serverUrl: invite.s, teamCode: String(invite.c) };
-    await saveAi();
-    state.settings.aiPromptDismissed = true;
-    await saveSettings();
+    await joinWithInvite(m[1]);
     setTimeout(() => toast("Connected to your team's AI assistant."), 800);
   } catch (err) {
     console.error(err);
     setTimeout(() => toast('This invite link is not valid. Ask your admin for a new one.', 4000), 800);
+  }
+}
+
+// On iPhone, links open in Safari, whose data is separate from the app on the
+// Home Screen. So users copy the invite link and paste it inside the app.
+async function pasteInvite() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch { /* clipboard blocked: ask instead */ }
+  let m = String(text).match(/#join=([A-Za-z0-9_-]+)/);
+  if (!m) {
+    const ok = await dialog({
+      title: 'Paste your invite link',
+      body: '<p class="muted">Copy the invite link your team sent you (press and hold it in WhatsApp or email, then tap Copy), and paste it here.</p><label class="field">Invite link <input id="invite-text" autocomplete="off" spellcheck="false" placeholder="https://amirelsawygethub.github.io/voice-weekly-report/#join=..."></label>',
+      ok: 'Connect'
+    });
+    if (!ok) return;
+    m = $('#invite-text').value.match(/#join=([A-Za-z0-9_-]+)/);
+  }
+  if (!m) { toast('That is not an invite link. Ask your team for the link.', 4000); return; }
+  try {
+    await joinWithInvite(m[1]);
+    toast("Connected to your team's AI assistant.");
+    if (state.view) RENDER[state.view]?.(state.viewOpts);
+  } catch (err) {
+    console.error(err);
+    toast('This invite link is not valid. Ask your team for a new one.', 4000);
   }
 }
 

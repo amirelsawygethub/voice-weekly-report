@@ -1,6 +1,6 @@
 // Service worker: makes the app installable and usable offline.
 // Network-first for app files so updates arrive promptly; cache fallback offline.
-const VERSION = 'v1.6.2';
+const VERSION = 'v1.6.3';
 const CACHE = `vwr-shell-${VERSION}`;
 const SHELL = [
   './',
